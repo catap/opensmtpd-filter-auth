@@ -763,16 +763,15 @@ osmtpd_mheader_skip_base64string(char *ptr, int optional)
 char *
 osmtpd_mheader_skip_hyphenatedword(char *ptr, int optional)
 {
-	char *start = ptr, *prev;
-	int ishyp = 0;
+	char *start = ptr, *end, *hyphen;
 
 	if ((ptr = osmtpd_mheader_skip_alpha(ptr, 0)) == NULL)
 		return optional ? start : NULL;
 
-	prev = ptr;
+	end = ptr;
 	while (1) {
 		if (ptr[0] == '-') {
-			ishyp = 1;
+			hyphen = hyphen == NULL ? ptr - 1 : hyphen;
 			ptr++;
 			continue;
 		}
@@ -780,11 +779,11 @@ osmtpd_mheader_skip_hyphenatedword(char *ptr, int optional)
 		if ((ptr = osmtpd_mheader_skip_alpha(start, 0)) == NULL &&
 		    (ptr = osmtpd_mheader_skip_digit(start, 0)) == NULL)
 			break;
-		ishyp = 0;
-		prev = ptr;
+		hyphen = NULL;
+		end = ptr;
 		
 	}
-	return ishyp ? prev : ptr;
+	return hyphen == NULL ? end : hyphen;
 }
 
 char *
