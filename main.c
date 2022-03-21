@@ -1201,11 +1201,12 @@ dkim_key_text_parse(struct signature *sig, char *key)
 			while (1) {
 				if ((tagvend =
 				    osmtpd_mheader_skip_dkimsig_keyhtagvalue(
-				    key, 0)) != NULL)
+				    key, 0)) == NULL)
 					break;
 				tmp = tagvend[0];
 				tagvend[0] = '\0';
 				if (EVP_get_digestbyname(key) == sig->ah) {
+					tagvend[0] = tmp;
 					h = 1;
 					break;
 				}
