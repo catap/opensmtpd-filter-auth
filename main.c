@@ -986,7 +986,6 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 					    "EVP_DigestVerifyUpdate");
 					return;
 				}
-				ptr = end - 1;
 			} else {
 				if (EVP_DigestVerifyUpdate(bctx, ptr,
 				    end - ptr) == 0) {
@@ -995,6 +994,7 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 					return;
 				}
 			}
+			ptr = end - 1;
 		}
 			
 	}
