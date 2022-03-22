@@ -1256,7 +1256,7 @@ dkim_key_text_parse(struct signature *sig, char *key)
 			while (1) {
 				if ((tagvend =
 				    osmtpd_mheader_skip_dkimsig_keystagtype(
-				    key, 0)) != NULL)
+				    key, 0)) == NULL)
 					break;
 				if (strncmp(key, "*", tagvend - key) == 0 ||
 				    strncmp(key, "email", tagvend - key) == 0) {
