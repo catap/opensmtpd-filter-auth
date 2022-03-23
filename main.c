@@ -908,6 +908,7 @@ dkim_signature_verify(struct signature *sig)
 			return;
 		}
 	}
+	EVP_MD_CTX_reset(bctx);
 	if (EVP_DigestVerifyInit(bctx, NULL, sig->ah, NULL, sig->p) != 1) {
 		dkim_errx(msg, "EVP_DigestVerifyInit");
 		return;
