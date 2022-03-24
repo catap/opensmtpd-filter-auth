@@ -1464,6 +1464,11 @@ dkim_body_verify(struct signature *sig)
 			return;
 		}
 	}
+	if (sig->l > 0) {
+		dkim_signature_state(sig, DKIM_PERMERROR,
+		    "l tag larger than body");
+		return;
+	}
 
 	if (EVP_DigestFinal_ex(sig->bhctx, digest, &digestsz) == 0) {
 		dkim_errx(sig->header->msg, "Can't finalize hash context");
