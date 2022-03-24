@@ -1105,19 +1105,19 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 	if (ar->ar_h_errno == TRY_AGAIN || ar->ar_h_errno == NO_RECOVERY) {
 		dkim_signature_state(sig, DKIM_TEMPERROR,
 		    hstrerror(ar->ar_h_errno));
-		return;
+		goto verify;
 	}
 	if (ar->ar_h_errno != NETDB_SUCCESS) {
 		dkim_signature_state(sig, DKIM_PERMERROR,
 		    hstrerror(ar->ar_h_errno));
-		return;
+		goto verify;
 	}
 
 	unpack_init(&pack, ar->ar_data, ar->ar_datalen);
 	if (unpack_header(&pack, &h) != 0 ||
 	    unpack_query(&pack, &q) != 0) {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid dns/txt");
-		return;
+		goto verify;
 	}
 	for (; h.ancount > 0; h.ancount--) {
 		unpack_rr(&pack, &rr);
@@ -1156,6 +1156,7 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 		if (!sig->header->msg->parsing_headers)
 			dkim_signature_verify(sig);
 	}
+ verify:
 	dkim_message_verify(sig->header->msg);
 }
 
