@@ -495,6 +495,10 @@ dkim_signature_parse(struct header *header)
 			return;
 		}
 	}
+	if (sig->t != -1 && sig->x != -1 && sig->t > sig->x) {
+		dkim_signature_state(sig, DKIM_PERMERROR, "t tag after x tag");
+		return;
+	}
 
 	if ((size_t)snprintf(subdomain, sizeof(subdomain), "%s._domainkey.%s",
 	    sig->s, sig->d) >= sizeof(subdomain)) {
