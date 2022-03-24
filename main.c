@@ -381,11 +381,12 @@ dkim_header_cat(struct osmtpd_ctx *ctx, const char *line)
 void
 dkim_signature_parse(struct header *header)
 {
-	char *buf;
-	char *end, tagname[3];
-	char subdomain[HOST_NAME_MAX + 1];
 	struct signature *sig;
 	struct asr_query *query;
+	char *buf, *i;
+	char *end, tagname[3];
+	char subdomain[HOST_NAME_MAX + 1];
+	size_t ilen, dlen;
 
 	/* Format checked by dkim_header_add */
 	buf = osmtpd_mheader_skip_fieldname(header->buf, 0);
@@ -477,6 +478,23 @@ dkim_signature_parse(struct header *header)
 		dkim_signature_state(sig, DKIM_PERMERROR, "Missing s tag");
 	if (sig->state != DKIM_UNKNOWN)
 		return;
+
+	if (sig->i != NULL) {
+		i = osmtpd_mheader_skip_local_part(sig->i, 1) + 1;
+		ilen = strlen(i);
+		dlen = strlen(sig->d);
+		if (ilen < dlen) {
+			dkim_signature_state(sig, DKIM_PERMERROR,
+			    "i tagn not subdomain of d");
+			return;
+		}
+		i += ilen - dlen;
+		if ((i[-1] != '.' && i[-1] != '@') || strcmp(i, sig->d) != 0) {
+			dkim_signature_state(sig, DKIM_PERMERROR,
+			    "i tagn not subdomain of d");
+			return;
+		}
+	}
 
 	if ((size_t)snprintf(subdomain, sizeof(subdomain), "%s._domainkey.%s",
 	    sig->s, sig->d) >= sizeof(subdomain)) {
