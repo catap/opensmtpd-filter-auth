@@ -475,6 +475,8 @@ dkim_signature_parse(struct header *header)
 		dkim_signature_state(sig, DKIM_PERMERROR, "Missing h tag");
 	else if (sig->s[0] == '\0')
 		dkim_signature_state(sig, DKIM_PERMERROR, "Missing s tag");
+	if (sig->state != DKIM_UNKNOWN)
+		return;
 
 	if ((size_t)snprintf(subdomain, sizeof(subdomain), "%s._domainkey.%s",
 	    sig->s, sig->d) >= sizeof(subdomain)) {
