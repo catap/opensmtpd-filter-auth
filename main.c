@@ -325,8 +325,10 @@ dkim_header_add(struct osmtpd_ctx *ctx, const char *line)
 			start = msg->header[msg->nheaders - 1].buf;
 			end = osmtpd_mheader_skip_fieldname(start, 0);
 			/* In case someone uses an obs-optional */
-			verify = osmtpd_mheader_skip_wsp(end, 1);
-			if (strncasecmp(
+			if (end != NULL)
+				verify = osmtpd_mheader_skip_wsp(end, 1);
+			if (end != NULL &&
+			    strncasecmp(
 			    start, "DKIM-Signature", end - start) == 0 &&
 			    verify[0] == ':')
 				dkim_signature_parse(
