@@ -4,7 +4,7 @@ MAN=	filter-dkimverify.8
 BINDIR=	${LOCALBASE}/libexec/smtpd/
 MANDIR=	${LOCALBASE}/man/man
 
-SRCS+=	main.c mheader.c unpack_dns.c
+SRCS+=	ltok.c main.c unpack_dns.c
 
 CFLAGS+=-I${LOCALBASE}/include
 CFLAGS+=-Wall -I${.CURDIR}
