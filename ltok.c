@@ -22,8 +22,6 @@
 
 #include "ltok.h"
 
-#include <stdio.h>
-
 /* RFC 5234 - Augmented BNF for Syntax Specifications: ABNF */
 const char *
 osmtpd_ltok_skip_alpha(const char *ptr, int optional)
@@ -849,27 +847,23 @@ osmtpd_ltok_skip_hex_octet(const char *ptr, int optional)
 const char *
 osmtpd_ltok_skip_hyphenated_word(const char *ptr, int optional)
 {
-	const char *start = ptr, *end, *hyphen;
+	const char *start = ptr, *end;
 
 	if ((ptr = osmtpd_ltok_skip_alpha(ptr, 0)) == NULL)
 		return optional ? start : NULL;
 
 	end = ptr;
 	while (1) {
-		if (ptr[0] == '-') {
-			hyphen = hyphen == NULL ? ptr - 1 : hyphen;
-			ptr++;
-			continue;
-		}
 		start = ptr;
-		if ((ptr = osmtpd_ltok_skip_alpha(start, 0)) == NULL &&
-		    (ptr = osmtpd_ltok_skip_digit(start, 0)) == NULL)
+		if ((ptr = osmtpd_ltok_skip_alpha(start, 0)) != NULL ||
+		    (ptr = osmtpd_ltok_skip_digit(start, 0)) != NULL) {
+			end = ptr;
+		} else if (start[0] == '-')
+			ptr = start + 1;
+		else
 			break;
-		hyphen = NULL;
-		end = ptr;
-		
 	}
-	return hyphen == NULL ? end : hyphen;
+	return end;
 }
 
 const char *
