@@ -486,7 +486,7 @@ dkim_signature_parse(struct header *header)
 		dlen = strlen(sig->d);
 		if (ilen < dlen) {
 			dkim_signature_state(sig, DKIM_PERMERROR,
-			    "i tagn not subdomain of d");
+			    "i tag not subdomain of d");
 			return;
 		}
 		i += ilen - dlen;
