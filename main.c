@@ -1373,20 +1373,12 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 void
 dkim_body_parse(struct message *msg, const char *line)
 {
-	char buf[999];	/* Line limit + 1 */
 	struct signature *sig;
-	size_t r, w;
-	ssize_t linelen;
-	size_t hashn, hashlf;
-	size_t i;
-	int canon = CANON_BODY_SIMPLE;
+	const char *end = line, *hash, *prev;
+	size_t hashn, len, i;
+	int wsp, ret;
 
-	linelen = (ssize_t)strlcpy(buf, line, sizeof(buf));
-	if (linelen >= (ssize_t)sizeof(buf)) {
-		dkim_errx(msg, "Line too long");
-		return;
-	}
-	if (buf[0] == '\0') {
+	if (line[0] == '\0') {
 		msg->body_whitelines++;
 		return;
 	}
@@ -1395,10 +1387,10 @@ dkim_body_parse(struct message *msg, const char *line)
 		for (i = 0; i < msg->nheaders; i++) {
 			if ((sig = msg->header[i].sig) == NULL)
 				continue;
-			hashlf = sig->l == -1 ? 2 : MIN(2, sig->l);
-			sig->l -= sig->l == -1 ? 0 : hashlf;
-			if (EVP_DigestUpdate(sig->bhctx, "\r\n", hashlf) == 0) {
-				dkim_errx(msg, "Can't update hash context");
+			hashn = sig->l == -1 ? 2 : MIN(2, sig->l);
+			sig->l -= sig->l == -1 ? 0 : hashn;
+			if (EVP_DigestUpdate(sig->bhctx, "\r\n", hashn) == 0) {
+				dkim_errx(msg, "EVP_DigestUpdate");
 				return;
 			}
 		}
@@ -1406,38 +1398,53 @@ dkim_body_parse(struct message *msg, const char *line)
 	msg->body_whitelines = 0;
 	msg->has_body = 1;
 
- hash:
+	while (line[0] != '\0') {
+		while (1) {
+			prev = end;
+			if ((end = osmtpd_ltok_skip_wsp(end, 0)) == NULL)
+				break;
+		}
+		end = prev;
+		wsp = end != line;
+		if (!wsp) {
+			while (osmtpd_ltok_skip_wsp(end, 0) == NULL &&
+			    end[0] != '\0')
+				end++;
+		}
+		for (i = 0; i < msg->nheaders; i++) {
+			sig = msg->header[i].sig;
+			if (sig == NULL || sig->state != DKIM_UNKNOWN)
+				continue;
+			if (wsp &&
+			    (sig->c & CANON_BODY) == CANON_BODY_RELAXED) {
+				hash = " ";
+				len = end[0] == '\0' ? 0 : 1;
+			} else {
+				hash = line;
+				len = (size_t)(end - line);
+			}
+			hashn = sig->l == -1 ? len : MIN(len, (size_t)sig->l);
+			sig->l -= sig->l == -1 ? 0 : hashn;
+			ret = EVP_DigestUpdate(sig->bhctx, hash, hashn);
+			if (ret == 0) {
+				dkim_errx(msg, "EVP_DigestUpdate");
+				return;
+			}
+		}
+		line = end;
+	}
 	for (i = 0; i < msg->nheaders; i++) {
 		sig = msg->header[i].sig;
-		if (sig == NULL || ((sig->c & CANON_BODY) != canon) ||
-		    sig->state != DKIM_UNKNOWN)
+		if (sig == NULL || sig->state != DKIM_UNKNOWN)
 			continue;
-		hashn = sig->l == -1 ? linelen : MIN(linelen, sig->l);
+		hashn = sig->l == -1 ? 2 : MIN(2, sig->l);
 		sig->l -= sig->l == -1 ? 0 : hashn;
-		hashlf = sig->l == -1 ? 2 : MIN(2, sig->l);
-		sig->l -= sig->l == -1 ? 0 : hashlf;
-		if (EVP_DigestUpdate(sig->bhctx, buf, hashn) == 0 ||
-		    EVP_DigestUpdate(sig->bhctx, "\r\n", hashlf) == 0) {
-			dkim_errx(msg, "Can't update hash context");
+		ret = EVP_DigestUpdate(sig->bhctx, "\r\n", hashn);
+		if (ret == 0) {
+			dkim_errx(msg, "EVP_DigestUpdate");
 			return;
 		}
 	}
-	if (canon == CANON_BODY_RELAXED)
-		return;
-	canon = CANON_BODY_RELAXED;
-	for (r = w = 0; buf[r] != '\0'; r++) {
-		if (buf[r] == ' ' || buf[r] == '\t') {
-			if (r != 0 && buf[w - 1] == ' ')
-				continue;
-			else
-				buf[w++] = ' ';
-		} else
-			buf[w++] = buf[r];
-	}
-	linelen = (w != 0 && buf[w - 1] == ' ') ? w - 1 : w;
-	buf[linelen] = '\0';
-
-	goto hash;
 }
 
 void
