@@ -1169,7 +1169,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 	const char *end, *tagvend;
 	char pkraw[UINT16_MAX] = "", pkimp[UINT16_MAX];
 	size_t pkoff, linelen;
-	int h = 0, k = 0, n = 0, p = 0, s = 0, t = 0;
+	int h = 0, k = 0, n = 0, p = 0, s = 0, t = 0, first = 1;
 	BIO *bio;
 
 	key = osmtpd_ltok_skip_fws(key, 1);
@@ -1177,24 +1177,6 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 	if ((end = osmtpd_ltok_skip_tag_list(key, 0)) == NULL)
 		return 0;
 
-	/*
-	 * RFC 6376 section 3.6.1, v=:
-	 * RECOMMENDED...This tag MUST be the first tag in the record.
-	 */
-	if (osmtpd_ltok_skip_tag_name(key, 0) - key == 1 &&
-	    key[0] == 'v') {
-		key = osmtpd_ltok_skip_tag_name(key, 0);
-		key = osmtpd_ltok_skip_fws(key, 1);
-		key++;	/* = */
-		key = osmtpd_ltok_skip_fws(key, 1);
-		end = osmtpd_ltok_skip_tag_value(key, 0);
-		if (end - key != 5 || strncmp(key, "DKIM1", 5) != 0)
-			return 0;
-		key += 5;
-		key = osmtpd_ltok_skip_fws(key, 1);
-		if (key[0] == ';')
-			key++;
-	}
 	while (key[0] != '\0') {
 		key = osmtpd_ltok_skip_fws(key, 1);
 		if ((end = osmtpd_ltok_skip_tag_name(key, 0)) == NULL)
@@ -1213,8 +1195,15 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			return 0;
 		switch (tagname) {
 		case 'v':
-			/* tagname in wrong position */
-			return 0;
+			/*
+			 * RFC 6376 section 3.6.1, v=:
+			 * RECOMMENDED...This tag MUST be the first tag in the
+			 * record.
+			 */
+			if (!first ||
+			    osmtpd_ltok_skip_key_v_tag_value(key, 0) != end)
+				return 0;
+			break;
 		case 'h':
 			if (h != 0)	/* Duplicate tag */
 				return 0;
@@ -1327,6 +1316,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			break;
 		}
 
+		first = 0;
 		key = osmtpd_ltok_skip_fws(key, 1);
 		if (key[0] == ';')
 			key++;
