@@ -1266,8 +1266,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			if (s != 0)	/* Duplicate tag */
 				return 0;
 			/* Invalid tag value */
-			if (osmtpd_ltok_skip_key_s_tag_value(key, 0) !=
-			    end)
+			if (osmtpd_ltok_skip_key_s_tag_value(key, 0) != end)
 				return 0;
 			while (1) {
 				if ((tagvend =
@@ -1292,12 +1291,10 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			if (t != 0)	/* Duplicate tag */
 				return 0;
 			t = 1;
-			if (osmtpd_ltok_skip_key_s_tag_type(key, 0) !=
-			    end)
+			if (osmtpd_ltok_skip_key_t_tag_value(key, 0) != end)
 				return 0;
 			while (1) {
-				tagvend =
-				    osmtpd_ltok_skip_key_t_tag_flag(
+				tagvend = osmtpd_ltok_skip_key_t_tag_flag(
 				    key, 0);
 				if (strncmp(key, "y", tagvend - key) == 0)
 					sig->kt |= KT_Y;
