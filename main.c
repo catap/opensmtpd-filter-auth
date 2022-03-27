@@ -482,7 +482,7 @@ dkim_signature_parse(struct header *header)
 
 	if (sig->i != NULL) {
 		i = osmtpd_ltok_skip_local_part(sig->i, 1) + 1;
-		ilen = strlen(i);
+		ilen = sig->isz - (size_t)(i - sig->i);
 		dlen = strlen(sig->d);
 		if (ilen < dlen) {
 			dkim_signature_state(sig, DKIM_PERMERROR,
@@ -490,9 +490,10 @@ dkim_signature_parse(struct header *header)
 			return;
 		}
 		i += ilen - dlen;
-		if ((i[-1] != '.' && i[-1] != '@') || strcmp(i, sig->d) != 0) {
+		if ((i[-1] != '.' && i[-1] != '@') ||
+		    strncmp(i, sig->d, dlen) != 0) {
 			dkim_signature_state(sig, DKIM_PERMERROR,
-			    "i tagn not subdomain of d");
+			    "i tag not subdomain of d");
 			return;
 		}
 	}
