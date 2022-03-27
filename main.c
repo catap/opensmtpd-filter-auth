@@ -1203,6 +1203,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			if (!first ||
 			    osmtpd_ltok_skip_key_v_tag_value(key, 0) != end)
 				return 0;
+			key = end;
 			break;
 		case 'h':
 			if (h != 0)	/* Duplicate tag */
