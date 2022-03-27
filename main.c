@@ -1208,12 +1208,10 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			if (h != 0)	/* Duplicate tag */
 				return 0;
 			/* Invalid tag value */
-			if (osmtpd_ltok_skip_key_h_tag_value(
-			    key, 0) != end)
+			if (osmtpd_ltok_skip_key_h_tag_value(key, 0) != end)
 				return 0;
 			while (1) {
-				if ((tagvend =
-				    osmtpd_ltok_skip_key_h_tag_value(
+				if ((tagvend = osmtpd_ltok_skip_key_h_tag_alg(
 				    key, 0)) == NULL)
 					break;
 				hashname = strndup(key, tagvend - key);
