@@ -303,6 +303,7 @@ dkim_message_free(struct osmtpd_ctx *ctx, void *data)
 				free(msg->header[i].sig->h[j]);
 			free(msg->header[i].sig->h);
 		}
+		free(msg->header[i].buf);
 		free(msg->header[i].sig);
 	}
 	free(msg->header);
