@@ -1206,7 +1206,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			tagname = key[0];
 		key = osmtpd_ltok_skip_fws(end, 1);
 		/* '=' */
-		if (key != '=')
+		if (key[0] != '=')
 			return 0;
 		key = osmtpd_ltok_skip_fws(key + 1, 1);
 		if ((end = osmtpd_ltok_skip_tag_value(key, 0)) == NULL)
