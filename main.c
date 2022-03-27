@@ -1199,18 +1199,10 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 		key = osmtpd_ltok_skip_fws(key, 1);
 		end = osmtpd_ltok_skip_tag_name(key, 0);
 
-		if ((size_t)(end - key) != 1) {
-			key = osmtpd_ltok_skip_fws(end, 1);
-			/* '=' */
-			key++;
-			key = osmtpd_ltok_skip_fws(key, 1);
-			key = osmtpd_ltok_skip_tag_value(key, 0);
-			key = osmtpd_ltok_skip_fws(key, 1);
-			if (key[0] == ';')
-				key++;
-			continue;
-		}
-		tagname = key[0];
+		if ((size_t)(end - key) != 1)
+			tagname = '\0';
+		else
+			tagname = key[0];
 		key = osmtpd_ltok_skip_fws(end, 1);
 		/* '=' */
 		key++;
