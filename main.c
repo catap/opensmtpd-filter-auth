@@ -1386,7 +1386,8 @@ dkim_body_parse(struct message *msg, const char *line)
 
 	while (msg->body_whitelines-- > 0) {
 		for (i = 0; i < msg->nheaders; i++) {
-			if ((sig = msg->header[i].sig) == NULL)
+			if ((sig = msg->header[i].sig) == NULL ||
+			    sig->state != DKIM_UNKNOWN)
 				continue;
 			hashn = sig->l == -1 ? 2 : MIN(2, sig->l);
 			sig->l -= sig->l == -1 ? 0 : hashn;
