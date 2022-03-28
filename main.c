@@ -1249,7 +1249,8 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			if (n != 0)	/* Duplicate tag */
 				return 0;
 			n = 1;
-			if (osmtpd_ltok_skip_key_n_tag_value(key, 0) != end)
+			/* semicolon is part of safe-char */
+			if (osmtpd_ltok_skip_key_n_tag_value(key, 0) < end)
 				return 0;
 			key = end;
 			break;
