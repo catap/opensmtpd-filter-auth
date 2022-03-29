@@ -302,6 +302,7 @@ dkim_message_free(struct osmtpd_ctx *ctx, void *data)
 			    msg->header[i].sig->h[j] != NULL; j++)
 				free(msg->header[i].sig->h[j]);
 			free(msg->header[i].sig->h);
+			EVP_PKEY_free(msg->header[i].sig->p);
 		}
 		free(msg->header[i].buf);
 		free(msg->header[i].sig);
