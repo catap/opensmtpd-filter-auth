@@ -1151,6 +1151,7 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 		if (dkim_key_text_parse(sig, key))
 			break;
 	}
+	free(ar->ar_data);
 
 	if (h.ancount == 0) {
 		dkim_signature_state(sig, DKIM_PERMERROR,
