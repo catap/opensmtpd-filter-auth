@@ -776,18 +776,11 @@ dkim_signature_parse_h(struct signature *sig, const char *start, const char *end
 void
 dkim_signature_parse_i(struct signature *sig, const char *start, const char *end)
 {
-	const char *i;
-
 	if (sig->i != NULL) {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate i tag");
 		return;
 	}
-	i = osmtpd_ltok_skip_local_part(start, 1);
-	if (i[0] != '@') {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid i tag");
-		return;
-	}
-	if (osmtpd_ltok_skip_domain(i + 1, 0) != end) {
+	if (osmtpd_ltok_skip_sig_i_tag_value(start, 0) != end) {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid i tag");
 		return;
 	}
