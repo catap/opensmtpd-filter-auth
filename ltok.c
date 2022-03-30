@@ -1376,7 +1376,7 @@ osmtpd_ltok_skip_sig_i_tag_value(const char *ptr, int optional)
 
 	ptr = osmtpd_ltok_skip_local_part(ptr, 1);
 	if (ptr[0] != '@' ||
-	    (ptr = osmtpd_ltok_skip_domain_name(ptr, 0)) == NULL)
+	    (ptr = osmtpd_ltok_skip_domain_name(ptr + 1, 0)) == NULL)
 		return optional ? start : NULL;
 	return ptr;
 }
