@@ -709,7 +709,7 @@ dkim_signature_parse_d(struct signature *sig, const char *start, const char *end
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate d tag");
 		return;
 	}
-	if (osmtpd_ltok_skip_domain(start, 0) != end ||
+	if (osmtpd_ltok_skip_sig_d_tag_value(start, 0) != end ||
 	    (size_t)(end - start) >= sizeof(sig->d)) {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid d tag");
 		return;
