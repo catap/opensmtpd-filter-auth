@@ -1648,7 +1648,7 @@ osmtpd_ltok_skip_key_h_tag_value(const char *ptr, int optional)
 {
 	const char *prev = ptr;
 
-	if ((prev = osmtpd_ltok_skip_key_h_tag_alg(ptr, 0)) == NULL)
+	if ((ptr = osmtpd_ltok_skip_key_h_tag_alg(ptr, 0)) == NULL)
 		return optional ? prev : NULL;
 	while (1) {
 		prev = ptr;
