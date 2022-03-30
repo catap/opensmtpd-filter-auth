@@ -727,6 +727,10 @@ dkim_signature_parse_h(struct signature *sig, const char *start, const char *end
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate h tag");
 		return;
 	}
+	if (osmtpd_ltok_skip_sig_h_tag_value(start, 0) != end) {
+		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid h tag");
+		return;
+	}
 	h = start;
 	while (1) {
 		if ((h = osmtpd_ltok_skip_hdr_name(h, 0)) == NULL) {
@@ -744,10 +748,6 @@ dkim_signature_parse_h(struct signature *sig, const char *start, const char *end
 		if (h[0] != ':')
 			break;
 		h = osmtpd_ltok_skip_fws(h + 1, 1);
-	}
-	if (h != end) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid h tag");
-		return;
 	}
 	if ((sig->h = calloc(n + 1, sizeof(*sig->h))) == NULL) {
 		dkim_err(sig->header->msg, "malloc");
