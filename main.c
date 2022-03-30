@@ -727,7 +727,7 @@ dkim_signature_parse_h(struct signature *sig, const char *start, const char *end
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate h tag");
 		return;
 	}
-	if (osmtpd_ltok_skip_sig_h_tag_value(start, 0) != end) {
+	if (osmtpd_ltok_skip_sig_h_tag_value(start, 0) < end) {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid h tag");
 		return;
 	}
