@@ -493,7 +493,7 @@ dkim_signature_parse(struct header *header)
 		}
 		i += ilen - dlen;
 		if ((i[-1] != '.' && i[-1] != '@') ||
-		    strncmp(i, sig->d, dlen) != 0) {
+		    strncasecmp(i, sig->d, dlen) != 0) {
 			dkim_signature_state(sig, DKIM_PERMERROR,
 			    "i tag not subdomain of d");
 			return;
