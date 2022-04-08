@@ -23,7 +23,6 @@
 
 #include <arpa/nameser.h>
 
-#include <assert.h>
 #include <ctype.h>
 #include <errno.h>
 #include <event.h>
@@ -1723,7 +1722,6 @@ dkim_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 	int size;
 	size_t nn;
 
-	assert(*n >= aroff);
 	va_start(ap, fmt);
 	size = vsnprintf(*ar + aroff, *n - aroff, fmt, ap);
 	va_end(ap);
