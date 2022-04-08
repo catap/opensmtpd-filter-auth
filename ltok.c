@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Martijn van Duren <martijn@openbsd.org>
+ * Copyright (c) 2020-2022 Martijn van Duren <martijn@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above

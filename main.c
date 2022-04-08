@@ -1210,9 +1210,13 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 	char tagname, *hashname;
 	const char *end, *tagvend, *b64;
 	char pkraw[UINT16_MAX] = "", pkimp[UINT16_MAX];
-	size_t pkrawlen = 0, pkoff, linelen, pklen;
-	int h = 0, k = 0, n = 0, p = 0, s = 0, t = 0, first = 1, tmp;
+	size_t pkrawlen = 0, pkoff, linelen;
+	int h = 0, k = 0, n = 0, p = 0, s = 0, t = 0, first = 1;
 	BIO *bio;
+#ifdef HAVE_ED25519
+	size_t pklen;
+	int tmp;
+#endif
 
 	key = osmtpd_ltok_skip_fws(key, 1);
 	/* Validate syntax early */
