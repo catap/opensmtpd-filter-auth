@@ -28,6 +28,7 @@
 #include <event.h>
 #include <limits.h>
 #include <netdb.h>
+#include <opensmtpd.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,7 +37,6 @@
 #include <unistd.h>
 #include <asr.h>
 
-#include "opensmtpd.h"
 #include "unpack_dns.h"
 #include "ltok.h"
 
