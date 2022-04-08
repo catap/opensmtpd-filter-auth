@@ -1407,7 +1407,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 		for (key = pkraw; key[0] != '\0';) {
 			if (pkoff + 2 >= sizeof(pkimp))
 				return 0;
-			pkimp[pkoff++] = key[0];
+			pkimp[pkoff++] = key++[0];
 			if (++linelen == 64) {
 				pkimp[pkoff++] = '\n';
 				linelen = 0;
