@@ -1211,7 +1211,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 	const char *end, *tagvend, *b64;
 	char pkraw[UINT16_MAX] = "", pkimp[UINT16_MAX];
 	size_t pkrawlen = 0, pkoff, linelen, pklen;
-	int h = 0, k = 0, n = 0, s = 0, t = 0, first = 1, tmp;
+	int h = 0, k = 0, n = 0, p = 0, s = 0, t = 0, first = 1, tmp;
 	BIO *bio;
 
 	key = osmtpd_ltok_skip_fws(key, 1);
@@ -1303,8 +1303,9 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			key = end;
 			break;
 		case 'p':
-			if (pkrawlen != 0)	/* Duplicate tag */
+			if (p != 0)	/* Duplicate tag */
 				return 0;
+			p = 1;
 			tagvend = key;
 			while (1) {
 				b64 = osmtpd_ltok_skip_fws(tagvend, 1);
@@ -1389,7 +1390,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			return 0;
 	}
 
-	if (pkrawlen == 0)		/* Missing tag */
+	if (!p)					/* Missing tag */
 		return 0;
 	if (k == 0 && sig->ak != EVP_PKEY_RSA)	/* Default to RSA */
 		return 0;
