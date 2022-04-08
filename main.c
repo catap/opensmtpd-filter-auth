@@ -63,6 +63,7 @@ struct signature {
 	const char *a;
 	size_t asz;
 	int ak;
+	int sephash;
 	const EVP_MD *ah;
 	char *b;
 	size_t bsz;
@@ -555,6 +556,13 @@ dkim_signature_parse_a(struct signature *sig, const char *start, const char *end
 	if (strncmp(start, "rsa-", 4) == 0) {
 		start += 4;
 		sig->ak = EVP_PKEY_RSA;
+		sig->sephash = 0;
+#if HAVE_ED25519
+	} else if (strncmp(start, "ed25519-", 8) == 0) {
+		start += 8;
+		sig->ak = EVP_PKEY_ED25519;
+		sig->sephash = 1;
+#endif
 	} else {
 		dkim_signature_state(sig, DKIM_NEUTRAL, "Unsuppored a tag k");
 		return;
@@ -917,6 +925,8 @@ dkim_signature_verify(struct signature *sig)
 {
 	struct message *msg = sig->header->msg;
 	static EVP_MD_CTX *bctx = NULL;
+	char digest[EVP_MAX_MD_SIZE];
+	unsigned int digestsz;
 	const char *end;
 	size_t i, header;
 
@@ -930,9 +940,17 @@ dkim_signature_verify(struct signature *sig)
 		}
 	}
 	EVP_MD_CTX_reset(bctx);
-	if (EVP_DigestVerifyInit(bctx, NULL, sig->ah, NULL, sig->p) != 1) {
-		dkim_errx(msg, "EVP_DigestVerifyInit");
-		return;
+	if (!sig->sephash) {
+		if (EVP_DigestVerifyInit(bctx, NULL, sig->ah, NULL,
+		    sig->p) != 1) {
+			dkim_errx(msg, "EVP_DigestVerifyInit");
+			return;
+		}
+	} else {
+		if (EVP_DigestInit_ex(bctx, sig->ah, NULL) != 1) {
+			dkim_errx(msg, "EVP_DigestInit_ex");
+			return;
+		}
 	}
 
 	for (i = 0; i < msg->nheaders; i++)
@@ -955,9 +973,36 @@ dkim_signature_verify(struct signature *sig)
 		}
 	}
 	dkim_signature_header(bctx, sig, sig->header);
-	if (EVP_DigestVerifyFinal(bctx, sig->b, sig->bsz) != 1)
-		dkim_signature_state(sig, DKIM_FAIL, "b mismatch");
+	if (!sig->sephash) {
+		if (EVP_DigestVerifyFinal(bctx, sig->b, sig->bsz) != 1)
+			dkim_signature_state(sig, DKIM_FAIL, "b mismatch");
+	} else {
+		if (EVP_DigestFinal_ex(bctx, digest, &digestsz) == 0) {
+			dkim_errx(msg, "EVP_DigestFinal_ex");
+			return;
+		}
+		if (EVP_DigestVerifyInit(bctx, NULL, NULL, NULL, sig->p) != 1) {
+			dkim_errx(msg, "EVP_DigestVerifyInit");
+			return;
+		}
+		switch (EVP_DigestVerify(bctx, sig->b, sig->bsz, digest,
+		    digestsz)) {
+		case 1:
+			break;
+		case 0:
+			dkim_signature_state(sig, DKIM_FAIL, "b mismatch");
+			break;
+		default:
+			dkim_errx(msg, "EVP_DigestVerify");
+			return;
+		}
+	}
 }
+
+/* EVP_DigestVerifyUpdate is a macro, so we can't alias this on a variable */
+#define dkim_b_digest_update(a, b, c)					\
+	(sig->sephash ? EVP_DigestUpdate((a), (b), (c)) :\
+	    EVP_DigestVerifyUpdate((a), (b), (c)))
 
 void
 dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
@@ -981,9 +1026,9 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 					ptr = osmtpd_ltok_skip_fws(
 					    ptr + 1, 1) - 1;
 			}
-			if (EVP_DigestVerifyUpdate(bctx, &c, 1) == 0) {
+			if (dkim_b_digest_update(bctx, &c, 1) == 0) {
 				dkim_errx(sig->header->msg,
-				    "EVP_DigestVerifyUpdate");
+				    "dkim_b_digest_update");
 				return;
 			}
 			continue;
@@ -995,25 +1040,25 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 				    ptr, 0) - 1;
 				continue;
 			}
-			if (EVP_DigestVerifyUpdate(bctx, ptr, 1) == 0) {
+			if (dkim_b_digest_update(bctx, ptr, 1) == 0) {
 				dkim_errx(sig->header->msg,
-				    "EVP_DigestVerifyUpdate");
+				    "dkim_b_digest_update");
 				return;
 			}
 		} else {
 			if (canon == CANON_HEADER_RELAXED) {
 				if (end[0] == '\0')
 					continue;
-				if (EVP_DigestVerifyUpdate(bctx, " ", 1) == 0) {
+				if (dkim_b_digest_update(bctx, " ", 1) == 0) {
 					dkim_errx(sig->header->msg,
-					    "EVP_DigestVerifyUpdate");
+					    "dkim_b_digest_update");
 					return;
 				}
 			} else {
-				if (EVP_DigestVerifyUpdate(bctx, ptr,
+				if (dkim_b_digest_update(bctx, ptr,
 				    end - ptr) == 0) {
 					dkim_errx(sig->header->msg,
-					    "EVP_DigestVerifyUpdate");
+					    "dkim_b_digest_update");
 					return;
 				}
 			}
@@ -1022,8 +1067,8 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 			
 	}
 	if (sig->header != header) {
-		if (EVP_DigestVerifyUpdate(bctx, "\r\n", 2) == 0) {
-			dkim_errx(sig->header->msg, "EVP_DigestVerifyUpdate");
+		if (dkim_b_digest_update(bctx, "\r\n", 2) == 0) {
+			dkim_errx(sig->header->msg, "dkim_b_digest_update");
 			return;
 		}
 	}
@@ -1163,10 +1208,10 @@ int
 dkim_key_text_parse(struct signature *sig, const char *key)
 {
 	char tagname, *hashname;
-	const char *end, *tagvend;
+	const char *end, *tagvend, *b64;
 	char pkraw[UINT16_MAX] = "", pkimp[UINT16_MAX];
-	size_t pkoff, linelen;
-	int h = 0, k = 0, n = 0, p = 0, s = 0, t = 0, first = 1;
+	size_t pkrawlen = 0, pkoff, linelen, pklen;
+	int h = 0, k = 0, n = 0, s = 0, t = 0, first = 1, tmp;
 	BIO *bio;
 
 	key = osmtpd_ltok_skip_fws(key, 1);
@@ -1236,7 +1281,15 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			if (k != 0)	/* Duplicate tag */
 				return 0;
 			k = 1;
-			if (strncmp(key, "rsa", end - key) != 0)
+			if (strncmp(key, "rsa", end - key) == 0) {
+				if (sig->ak != EVP_PKEY_RSA)
+					return 0;
+#if HAVE_ED25519
+			} else if (strncmp(key, "ed25519", end - key) == 0) {
+				if (sig->ak != EVP_PKEY_ED25519)
+					return 0;
+#endif
+			} else
 				return 0;
 			key = end;
 			break;
@@ -1250,15 +1303,33 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			key = end;
 			break;
 		case 'p':
-			if (p != 0)	/* Duplicate tag */
+			if (pkrawlen != 0)	/* Duplicate tag */
 				return 0;
-			p = 1;
-			tagvend = osmtpd_ltok_skip_base64string(key, 1);
+			tagvend = key;
+			while (1) {
+				b64 = osmtpd_ltok_skip_fws(tagvend, 1);
+				if (osmtpd_ltok_skip_alphadigitps(
+				    tagvend, 0) == NULL)
+					break;
+				pkraw[pkrawlen++] = tagvend++[0];
+				if (pkrawlen >= sizeof(pkraw))
+					return 0;
+			}
+			if (tagvend[0] == '=') {
+				pkraw[pkrawlen++] = '=';
+				tagvend = osmtpd_ltok_skip_fws(b64 + 1, 1);
+				if (pkrawlen >= sizeof(pkraw))
+					return 0;
+				if (tagvend[0] == '=') {
+					pkraw[pkrawlen++] = '=';
+					tagvend++;
+					if (pkrawlen >= sizeof(pkraw))
+						return 0;
+				}
+			}
 			/* Invalid tag value */
-			if (tagvend != end ||
-			    (size_t)(end - key) >= sizeof(pkraw))
+			if (pkrawlen % 4 != 0 || tagvend != end)
 				return 0;
-			strlcpy(pkraw, key, tagvend - key + 1);
 			key = end;
 			break;
 		case 's':
@@ -1318,7 +1389,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			return 0;
 	}
 
-	if (p == 0)		/* Missing tag */
+	if (pkrawlen == 0)		/* Missing tag */
 		return 0;
 	if (k == 0 && sig->ak != EVP_PKEY_RSA)	/* Default to RSA */
 		return 0;
@@ -1341,7 +1412,6 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 				pkimp[pkoff++] = '\n';
 				linelen = 0;
 			}
-			key = osmtpd_ltok_skip_fws(key + 1, 1);
 		}
 		/* Leverage pkoff check in loop */
 		if (linelen != 0)
@@ -1355,15 +1425,30 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 		}
 		sig->p = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
 		BIO_free(bio);
-		if (sig->p == NULL) {
-			/*
-			 * XXX No clue how to differentiate between invalid key
-			 * and temporary failure like *alloc.
-			 * Assume invalid key, because it's more likely.
-			 */
-			return 0;
-		}
 		break;
+#if HAVE_ED25519
+	case EVP_PKEY_ED25519:
+		if ((pkrawlen / 4) * 3 >= sizeof(pkimp))
+			return 0;
+		EVP_DecodeInit(ectx);
+		if (EVP_DecodeUpdate(ectx, pkimp, &tmp, pkraw, pkrawlen) == -1)
+			return 0;
+		pklen = tmp;
+		if (EVP_DecodeFinal(ectx, pkimp, &tmp) == -1)
+			return 0;
+		pklen += tmp;
+		sig->p = EVP_PKEY_new_raw_public_key(sig->ak, NULL, pkimp,
+		    pklen);
+		break;
+#endif
+	}
+	if (sig->p == NULL) {
+		/*
+		 * XXX No clue how to differentiate between invalid key and
+		 * temporary failure like *alloc.
+		 * Assume invalid key, because it's more likely.
+		 */
+		return 0;
 	}
 	return 1;
 }
@@ -1471,7 +1556,7 @@ dkim_body_verify(struct signature *sig)
 	}
 
 	if (EVP_DigestFinal_ex(sig->bhctx, digest, &digestsz) == 0) {
-		dkim_errx(sig->header->msg, "Can't finalize hash context");
+		dkim_errx(sig->header->msg, "EVP_DigestFinal_ex");
 		return;
 	}
 
