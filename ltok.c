@@ -96,10 +96,10 @@ osmtpd_ltok_skip_hexdig(const char *ptr, int optional)
 
 	if ((ptr = osmtpd_ltok_skip_digit(ptr, 0)) != NULL)
 		return ptr;
-	l = tolower(ptr[0]);
+	l = tolower(start[0]);
 	if (l == 'a' || l == 'b' || l == 'c' || l == 'd' ||
 	    l == 'e' || l == 'f')
-		return ptr + 1;
+		return start + 1;
 	return optional ? start : NULL;
 }
 
