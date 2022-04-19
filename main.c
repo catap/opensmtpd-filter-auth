@@ -1207,7 +1207,7 @@ int
 dkim_key_text_parse(struct signature *sig, const char *key)
 {
 	char tagname, *hashname;
-	const char *end, *tagvend, *b64;
+	const char *end, *tagvend;
 	char pkraw[UINT16_MAX] = "", pkimp[UINT16_MAX];
 	size_t pkrawlen = 0, pkoff, linelen;
 	int h = 0, k = 0, n = 0, p = 0, s = 0, t = 0, first = 1;
@@ -1309,32 +1309,30 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			if (p != 0)	/* Duplicate tag */
 				return 0;
 			p = 1;
-			tagvend = key;
 			while (1) {
-				b64 = osmtpd_ltok_skip_fws(tagvend, 1);
+				key = osmtpd_ltok_skip_fws(key, 1);
 				if (osmtpd_ltok_skip_alphadigitps(
-				    tagvend, 0) == NULL)
+				    key, 0) == NULL)
 					break;
-				pkraw[pkrawlen++] = tagvend++[0];
+				pkraw[pkrawlen++] = key++[0];
 				if (pkrawlen >= sizeof(pkraw))
 					return 0;
 			}
-			if (tagvend[0] == '=') {
+			if (key[0] == '=') {
 				pkraw[pkrawlen++] = '=';
-				tagvend = osmtpd_ltok_skip_fws(b64 + 1, 1);
+				key = osmtpd_ltok_skip_fws(key + 1, 1);
 				if (pkrawlen >= sizeof(pkraw))
 					return 0;
-				if (tagvend[0] == '=') {
+				if (key[0] == '=') {
 					pkraw[pkrawlen++] = '=';
-					tagvend++;
+					key++;
 					if (pkrawlen >= sizeof(pkraw))
 						return 0;
 				}
 			}
 			/* Invalid tag value */
-			if (pkrawlen % 4 != 0 || tagvend != end)
+			if (pkrawlen % 4 != 0 || key != end)
 				return 0;
-			key = end;
 			break;
 		case 's':
 			if (s != 0)	/* Duplicate tag */
