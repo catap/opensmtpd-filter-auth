@@ -556,12 +556,10 @@ dkim_signature_parse_a(struct signature *sig, const char *start, const char *end
 		start += 4;
 		sig->ak = EVP_PKEY_RSA;
 		sig->sephash = 0;
-#if HAVE_ED25519
 	} else if (strncmp(start, "ed25519-", 8) == 0) {
 		start += 8;
 		sig->ak = EVP_PKEY_ED25519;
 		sig->sephash = 1;
-#endif
 	} else {
 		dkim_signature_state(sig, DKIM_NEUTRAL, "Unsuppored a tag k");
 		return;
@@ -1212,10 +1210,8 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 	size_t pkrawlen = 0, pkoff, linelen;
 	int h = 0, k = 0, n = 0, p = 0, s = 0, t = 0, first = 1;
 	BIO *bio;
-#ifdef HAVE_ED25519
 	size_t pklen;
 	int tmp;
-#endif
 
 	key = osmtpd_ltok_skip_fws(key, 1);
 	/* Validate syntax early */
@@ -1287,11 +1283,9 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 			if (strncmp(key, "rsa", end - key) == 0) {
 				if (sig->ak != EVP_PKEY_RSA)
 					return 0;
-#if HAVE_ED25519
 			} else if (strncmp(key, "ed25519", end - key) == 0) {
 				if (sig->ak != EVP_PKEY_ED25519)
 					return 0;
-#endif
 			} else
 				return 0;
 			key = end;
@@ -1428,7 +1422,6 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 		sig->p = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
 		BIO_free(bio);
 		break;
-#if HAVE_ED25519
 	case EVP_PKEY_ED25519:
 		if ((pkrawlen / 4) * 3 >= sizeof(pkimp))
 			return 0;
@@ -1442,7 +1435,6 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 		sig->p = EVP_PKEY_new_raw_public_key(sig->ak, NULL, pkimp,
 		    pklen);
 		break;
-#endif
 	}
 	if (sig->p == NULL) {
 		/*
