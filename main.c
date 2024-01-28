@@ -96,6 +96,15 @@ struct dkim_signature {
 	EVP_PKEY *p;
 };
 
+/*
+ * Use RFC7601 (Authentication-Results), anyway OpenSMTPD reports only pass or fail
+ */
+enum iprev_state {
+	IPREV_NONE,
+	IPREV_PASS,
+	IPREV_FAIL
+};
+
 struct header {
 	struct message *msg;
 	uint8_t readdone;
@@ -120,12 +129,20 @@ struct message {
 	int readdone;
 };
 
+struct session {
+	struct osmtpd_ctx *ctx;
+	enum iprev_state iprev;
+};
+
 void usage(void);
 void auth_err(struct message *, char *);
 void auth_errx(struct message *, char *);
 void auth_conf(const char *, const char *);
+void auth_connect(struct osmtpd_ctx *, const char *, enum osmtpd_status, struct sockaddr_storage *, struct sockaddr_storage *);
 void auth_dataline(struct osmtpd_ctx *, const char *);
 void auth_commit(struct osmtpd_ctx *);
+void *auth_session_new(struct osmtpd_ctx *);
+void auth_session_free(struct osmtpd_ctx *, void *);
 void *auth_message_new(struct osmtpd_ctx *);
 void auth_message_free(struct osmtpd_ctx *, void *);
 void dkim_header_add(struct osmtpd_ctx *, const char *);
@@ -152,6 +169,7 @@ void dkim_header_cat(struct osmtpd_ctx *, const char *);
 void dkim_body_parse(struct message *, const char *);
 void dkim_body_verify(struct dkim_signature *);
 void dkim_rr_resolve(struct asr_result *, void *);
+const char *iprev_state2str(enum iprev_state);
 void auth_message_verify(struct message *);
 ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
     __attribute__((__format__ (printf, 4, 5)));
@@ -175,9 +193,12 @@ main(int argc, char *argv[])
 	if ((ectx = EVP_ENCODE_CTX_new()) == NULL)
 		osmtpd_err(1, "EVP_ENCODE_CTX_new");
 
+	osmtpd_need(OSMTPD_NEED_FCRDNS);
 	osmtpd_register_conf(auth_conf);
 	osmtpd_register_filter_dataline(auth_dataline);
 	osmtpd_register_filter_commit(auth_commit);
+	osmtpd_register_report_connect(1, auth_connect);
+	osmtpd_local_session(auth_session_new, auth_session_free);
 	osmtpd_local_message(auth_message_new, auth_message_free);
 	osmtpd_run();
 
@@ -201,6 +222,18 @@ auth_conf(const char *key, const char *value)
 		if (authservid + strlen(authservid) != end)
 			osmtpd_errx(1, "Invalid authservid");
 	}
+}
+
+void
+auth_connect(struct osmtpd_ctx *ctx, const char *rdns, enum osmtpd_status fcrdns,
+			 struct sockaddr_storage *src, struct sockaddr_storage *dst)
+{
+	struct session *ses = ctx->local_session;
+
+	if (fcrdns == OSMTPD_STATUS_OK)
+		ses->iprev = IPREV_PASS;
+	else
+		ses->iprev = IPREV_FAIL;
 }
 
 void
@@ -261,6 +294,28 @@ auth_commit(struct osmtpd_ctx *ctx)
 		osmtpd_filter_disconnect(ctx, "Internal server error");
 	else
 		osmtpd_filter_proceed(ctx);
+}
+
+void *
+auth_session_new(struct osmtpd_ctx *ctx)
+{
+	struct session *ses;
+
+	if ((ses = malloc(sizeof(*ses))) == NULL)
+		osmtpd_err(1, NULL);
+
+	ses->ctx = ctx;
+	ses->iprev = IPREV_NONE;
+
+	return ses;
+}
+
+void
+auth_session_free(struct osmtpd_ctx *ctx, void *data)
+{
+	struct session *ses = data;
+
+	free(ses);
 }
 
 void *
@@ -1566,9 +1621,24 @@ dkim_body_verify(struct dkim_signature *sig)
 		dkim_signature_state(sig, DKIM_FAIL, "bh mismatch");
 }
 
+const char *
+iprev_state2str(enum iprev_state state)
+{
+	switch (state)
+	{
+	case IPREV_NONE:
+		return "none";
+	case IPREV_PASS:
+		return "pass";
+	case IPREV_FAIL:
+		return "fail";
+	}
+}
+
 void
 auth_message_verify(struct message *msg)
 {
+	struct session *ses = msg->ctx->local_session;
 	struct dkim_signature *sig;
 	size_t i;
 	ssize_t n, aroff = 0;
@@ -1644,6 +1714,18 @@ auth_message_verify(struct message *msg)
 			goto fail;
 		}
 	}
+
+	if ((aroff = auth_ar_cat(&line, &linelen, aroff,
+	    "; iprev=%s", iprev_state2str(ses->iprev))) == -1) {
+		auth_err(msg, "malloc");
+		goto fail;
+	}
+
+	if (aroff == -1) {
+		auth_err(msg, "malloc");
+		goto fail;
+	}
+
 	auth_ar_print(msg->ctx, line);
 
 	rewind(msg->origf);
@@ -1694,6 +1776,10 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			    sizeof("dkim") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_keyword(
 				    ncheckpoint + sizeof("dkim"), 0);
+			} else if (strncmp(ncheckpoint, "iprev",
+			    sizeof("iprev") - 1) == 0) {
+				ncheckpoint = osmtpd_ltok_skip_keyword(
+				    ncheckpoint + sizeof("iprev"), 0);
 			/* reasonspec */
 			} else if (strncmp(ncheckpoint, "reason",
 			    sizeof("reason") - 1) == 0) {
