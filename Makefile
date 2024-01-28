@@ -1,7 +1,7 @@
 LOCALBASE?=	/usr/local/
 
-PROG=		filter-dkimverify
-MAN=		filter-dkimverify.8
+PROG=		filter-auth
+MAN=		filter-auth.8
 BINDIR=		${LOCALBASE}/libexec/smtpd/
 MANDIR=		${LOCALBASE}/man/man
 

@@ -1,5 +1,6 @@
 .\"	$OpenBSD$
 .\"
+.\" Copyright (c) 2024 Kirill A. Korinsky <kirill@korins.ky>>
 .\" Copyright (c) 2019 Martijn van Duren <martijn@openbsd.org>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
@@ -15,11 +16,11 @@
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
 .Dd $Mdocdate$
-.Dt FILTER-DKIMVERIFY 8
+.Dt FILTER-AUTH 8
 .Os
 .Sh NAME
-.Nm filter-dkimverify
-.Nd verifies dkim signature of messages
+.Nm filter-auth
+.Nd authenticate email via verification of dkim signature
 .Sh SYNOPSIS
 .Nm
 .Sh DESCRIPTION
