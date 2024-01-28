@@ -44,7 +44,7 @@
  * Use RFC8601 (Authentication-Results) codes instead of RFC6376 codes,
  * since they're more expressive.
  */
-enum state {
+enum dkim_state {
 	DKIM_UNKNOWN,
 	DKIM_PASS,
 	DKIM_FAIL,
@@ -54,9 +54,9 @@ enum state {
 	DKIM_PERMERROR
 };
 
-struct signature {
+struct dkim_signature {
 	struct header *header;
-	enum state state;
+	enum dkim_state state;
 	const char *state_reason;
 	int v;
 	const char *a;
@@ -102,7 +102,7 @@ struct header {
 	uint8_t parsed;
 	char *buf;
 	size_t buflen;
-	struct signature *sig;
+	struct dkim_signature *sig;
 };
 
 #define AUTHENTICATION_RESULTS_LINELEN 78
@@ -121,42 +121,42 @@ struct message {
 };
 
 void usage(void);
-void dkim_err(struct message *, char *);
-void dkim_errx(struct message *, char *);
-void dkim_conf(const char *, const char *);
-void dkim_dataline(struct osmtpd_ctx *, const char *);
-void dkim_commit(struct osmtpd_ctx *);
-void *dkim_message_new(struct osmtpd_ctx *);
-void dkim_message_free(struct osmtpd_ctx *, void *);
+void auth_err(struct message *, char *);
+void auth_errx(struct message *, char *);
+void auth_conf(const char *, const char *);
+void auth_dataline(struct osmtpd_ctx *, const char *);
+void auth_commit(struct osmtpd_ctx *);
+void *auth_message_new(struct osmtpd_ctx *);
+void auth_message_free(struct osmtpd_ctx *, void *);
 void dkim_header_add(struct osmtpd_ctx *, const char *);
 void dkim_signature_parse(struct header *);
-void dkim_signature_parse_v(struct signature *, const char *, const char *);
-void dkim_signature_parse_a(struct signature *, const char *, const char *);
-void dkim_signature_parse_b(struct signature *, const char *, const char *);
-void dkim_signature_parse_bh(struct signature *, const char *, const char *);
-void dkim_signature_parse_c(struct signature *, const char *, const char *);
-void dkim_signature_parse_d(struct signature *, const char *, const char *);
-void dkim_signature_parse_h(struct signature *, const char *, const char *);
-void dkim_signature_parse_i(struct signature *, const char *, const char *);
-void dkim_signature_parse_l(struct signature *, const char *, const char *);
-void dkim_signature_parse_q(struct signature *, const char *, const char *);
-void dkim_signature_parse_s(struct signature *, const char *, const char *);
-void dkim_signature_parse_t(struct signature *, const char *, const char *);
-void dkim_signature_parse_x(struct signature *, const char *, const char *);
-void dkim_signature_parse_z(struct signature *, const char *, const char *);
-void dkim_signature_verify(struct signature *);
-void dkim_signature_header(EVP_MD_CTX *, struct signature *, struct header *);
-void dkim_signature_state(struct signature *, enum state, const char *);
-const char *dkim_state2str(enum state);
+void dkim_signature_parse_v(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_a(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_b(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_bh(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_c(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_d(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_h(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_i(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_l(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_q(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_s(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_t(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_x(struct dkim_signature *, const char *, const char *);
+void dkim_signature_parse_z(struct dkim_signature *, const char *, const char *);
+void dkim_signature_verify(struct dkim_signature *);
+void dkim_signature_header(EVP_MD_CTX *, struct dkim_signature *, struct header *);
+void dkim_signature_state(struct dkim_signature *, enum dkim_state, const char *);
+const char *dkim_state2str(enum dkim_state);
 void dkim_header_cat(struct osmtpd_ctx *, const char *);
 void dkim_body_parse(struct message *, const char *);
-void dkim_body_verify(struct signature *);
+void dkim_body_verify(struct dkim_signature *);
 void dkim_rr_resolve(struct asr_result *, void *);
-void dkim_message_verify(struct message *);
-ssize_t dkim_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
+void auth_message_verify(struct message *);
+ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
     __attribute__((__format__ (printf, 4, 5)));
-void dkim_ar_print(struct osmtpd_ctx *, const char *);
-int dkim_key_text_parse(struct signature *, const char *);
+void auth_ar_print(struct osmtpd_ctx *, const char *);
+int dkim_key_text_parse(struct dkim_signature *, const char *);
 
 char *authservid;
 EVP_ENCODE_CTX *ectx = NULL;
@@ -175,17 +175,17 @@ main(int argc, char *argv[])
 	if ((ectx = EVP_ENCODE_CTX_new()) == NULL)
 		osmtpd_err(1, "EVP_ENCODE_CTX_new");
 
-	osmtpd_register_conf(dkim_conf);
-	osmtpd_register_filter_dataline(dkim_dataline);
-	osmtpd_register_filter_commit(dkim_commit);
-	osmtpd_local_message(dkim_message_new, dkim_message_free);
+	osmtpd_register_conf(auth_conf);
+	osmtpd_register_filter_dataline(auth_dataline);
+	osmtpd_register_filter_commit(auth_commit);
+	osmtpd_local_message(auth_message_new, auth_message_free);
 	osmtpd_run();
 
 	return 0;
 }
 
 void
-dkim_conf(const char *key, const char *value)
+auth_conf(const char *key, const char *value)
 {
 	const char *end;
 
@@ -204,7 +204,7 @@ dkim_conf(const char *key, const char *value)
 }
 
 void
-dkim_dataline(struct osmtpd_ctx *ctx, const char *line)
+auth_dataline(struct osmtpd_ctx *ctx, const char *line)
 {
 	struct message *msg = ctx->local_message;
 	size_t i;
@@ -218,7 +218,7 @@ dkim_dataline(struct osmtpd_ctx *ctx, const char *line)
 	}
 
 	if (fprintf(msg->origf, "%s\n", line) < 0) {
-		dkim_err(msg, "Couldn't write to tempfile");
+		auth_err(msg, "Couldn't write to tempfile");
 		return;
 	}
 	if (line[0] == '.') {
@@ -230,7 +230,7 @@ dkim_dataline(struct osmtpd_ctx *ctx, const char *line)
 					continue;
 				dkim_body_verify(msg->header[i].sig);
 			}
-			dkim_message_verify(msg);
+			auth_message_verify(msg);
 			return;
 		}
 	}
@@ -253,7 +253,7 @@ dkim_dataline(struct osmtpd_ctx *ctx, const char *line)
 }
 
 void
-dkim_commit(struct osmtpd_ctx *ctx)
+auth_commit(struct osmtpd_ctx *ctx)
 {
 	struct message *msg = ctx->local_message;
 
@@ -264,7 +264,7 @@ dkim_commit(struct osmtpd_ctx *ctx)
 }
 
 void *
-dkim_message_new(struct osmtpd_ctx *ctx)
+auth_message_new(struct osmtpd_ctx *ctx)
 {
 	struct message *msg;
 
@@ -272,7 +272,7 @@ dkim_message_new(struct osmtpd_ctx *ctx)
 		osmtpd_err(1, NULL);
 
 	if ((msg->origf = tmpfile()) == NULL) {
-		dkim_err(msg, "Can't open tempfile");
+		auth_err(msg, "Can't open tempfile");
 		return NULL;
 	}
 	msg->ctx = ctx;
@@ -288,7 +288,7 @@ dkim_message_new(struct osmtpd_ctx *ctx)
 }
 
 void
-dkim_message_free(struct osmtpd_ctx *ctx, void *data)
+auth_message_free(struct osmtpd_ctx *ctx, void *data)
 {
 	struct message *msg = data;
 	size_t i, j;
@@ -344,7 +344,7 @@ dkim_header_add(struct osmtpd_ctx *ctx, const char *line)
 	if (msg->nheaders % 10 == 0) {
 		if ((headers = recallocarray(msg->header, msg->nheaders,
 		    msg->nheaders + 10, sizeof(*msg->header))) == NULL) {
-			dkim_err(msg, "malloc");
+			auth_err(msg, "malloc");
 			return;
 		}
 		msg->header = headers;
@@ -371,7 +371,7 @@ dkim_header_cat(struct osmtpd_ctx *ctx, const char *line)
 	if (needed > (header->buflen / 1024) + 1) {
 		buf = reallocarray(header->buf, (needed / 1024) + 1, 1024);
 		if (buf == NULL) {
-			dkim_err(msg, "malloc");
+			auth_err(msg, "malloc");
 			return;
 		}
 		header->buf = buf;
@@ -384,7 +384,7 @@ dkim_header_cat(struct osmtpd_ctx *ctx, const char *line)
 void
 dkim_signature_parse(struct header *header)
 {
-	struct signature *sig;
+	struct dkim_signature *sig;
 	struct asr_query *query;
 	const char *buf, *i, *end;
 	char tagname[3];
@@ -396,7 +396,7 @@ dkim_signature_parse(struct header *header)
 	buf = osmtpd_ltok_skip_wsp(buf, 1) + 1;
 
 	if ((header->sig = calloc(1, sizeof(*header->sig))) == NULL) {
-		dkim_err(header->msg, "malloc");
+		auth_err(header->msg, "malloc");
 		return;
 	}
 	sig = header->sig;
@@ -512,18 +512,18 @@ dkim_signature_parse(struct header *header)
 	}
 
 	if ((query = res_query_async(subdomain, C_IN, T_TXT, NULL)) == NULL) {
-		dkim_err(header->msg, "res_query_async");
+		auth_err(header->msg, "res_query_async");
 		return;
 	}
 	if ((sig->query = event_asr_run(query, dkim_rr_resolve, sig)) == NULL) {
-		dkim_err(header->msg, "event_asr_run");
+		auth_err(header->msg, "event_asr_run");
 		asr_abort(query);
 		return;
 	}
 }
 
 void
-dkim_signature_parse_v(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_v(struct dkim_signature *sig, const char *start, const char *end)
 {
 	if (sig->v != 0) {	/* Duplicate tag */
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate v tag");
@@ -537,7 +537,7 @@ dkim_signature_parse_v(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_a(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_a(struct dkim_signature *sig, const char *start, const char *end)
 {
 	char ah[sizeof("sha256")];
 
@@ -577,17 +577,17 @@ dkim_signature_parse_a(struct signature *sig, const char *start, const char *end
 		return;
 	}
 	if ((sig->bhctx = EVP_MD_CTX_new()) == NULL) {
-		dkim_err(sig->header->msg, "EVP_MD_CTX_new");
+		auth_err(sig->header->msg, "EVP_MD_CTX_new");
 		return;
 	}
 	if (EVP_DigestInit_ex(sig->bhctx, sig->ah, NULL) <= 0) {
-		dkim_err(sig->header->msg, "EVP_DigestInit_ex");
+		auth_err(sig->header->msg, "EVP_DigestInit_ex");
 		return;
 	}
 }
 
 void
-dkim_signature_parse_b(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_b(struct dkim_signature *sig, const char *start, const char *end)
 {
 	int decodesz;
 
@@ -597,7 +597,7 @@ dkim_signature_parse_b(struct signature *sig, const char *start, const char *end
 	}
 	sig->bheader = start;
 	if ((sig->b = malloc((((end - start) / 4) + 1) * 3)) == NULL) {
-		dkim_err(sig->header->msg, "malloc");
+		auth_err(sig->header->msg, "malloc");
 		return;
 	}
 	/* EVP_DecodeBlock doesn't handle internal whitespace */
@@ -617,7 +617,7 @@ dkim_signature_parse_b(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_bh(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_bh(struct dkim_signature *sig, const char *start, const char *end)
 {
 	const char *b64;
 	size_t n;
@@ -671,7 +671,7 @@ dkim_signature_parse_bh(struct signature *sig, const char *start, const char *en
 }
 
 void
-dkim_signature_parse_c(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_c(struct dkim_signature *sig, const char *start, const char *end)
 {
 	if (sig->c != 0) {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate c tag");
@@ -710,7 +710,7 @@ dkim_signature_parse_c(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_d(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_d(struct dkim_signature *sig, const char *start, const char *end)
 {
 	if (sig->d[0] != '\0') {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate d tag");
@@ -725,7 +725,7 @@ dkim_signature_parse_d(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_h(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_h(struct dkim_signature *sig, const char *start, const char *end)
 {
 	const char *h;
 	size_t n = 0;
@@ -757,7 +757,7 @@ dkim_signature_parse_h(struct signature *sig, const char *start, const char *end
 		h = osmtpd_ltok_skip_fws(h + 1, 1);
 	}
 	if ((sig->h = calloc(n + 1, sizeof(*sig->h))) == NULL) {
-		dkim_err(sig->header->msg, "malloc");
+		auth_err(sig->header->msg, "malloc");
 		return;
 	}
 	n = 0;
@@ -770,7 +770,7 @@ dkim_signature_parse_h(struct signature *sig, const char *start, const char *end
 			break;
 		}
 		if ((sig->h[n++] = strndup(start, h - start)) == NULL) {
-			dkim_err(sig->header->msg, "malloc");
+			auth_err(sig->header->msg, "malloc");
 			return;
 		}
 		start = osmtpd_ltok_skip_fws(h, 1);
@@ -781,7 +781,7 @@ dkim_signature_parse_h(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_i(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_i(struct dkim_signature *sig, const char *start, const char *end)
 {
 	if (sig->i != NULL) {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate i tag");
@@ -796,7 +796,7 @@ dkim_signature_parse_i(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_l(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_l(struct dkim_signature *sig, const char *start, const char *end)
 {
 	long long l;
 	char *lend;
@@ -821,7 +821,7 @@ dkim_signature_parse_l(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_q(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_q(struct dkim_signature *sig, const char *start, const char *end)
 {
 	const char *qend;
 
@@ -855,7 +855,7 @@ dkim_signature_parse_q(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_s(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_s(struct dkim_signature *sig, const char *start, const char *end)
 {
 	if (sig->s[0] != '\0') {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate s tag");
@@ -869,7 +869,7 @@ dkim_signature_parse_s(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_t(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_t(struct dkim_signature *sig, const char *start, const char *end)
 {
 	char *tend;
 
@@ -887,7 +887,7 @@ dkim_signature_parse_t(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_x(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_x(struct dkim_signature *sig, const char *start, const char *end)
 {
 	char *xend;
 
@@ -905,7 +905,7 @@ dkim_signature_parse_x(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_parse_z(struct signature *sig, const char *start, const char *end)
+dkim_signature_parse_z(struct dkim_signature *sig, const char *start, const char *end)
 {
 	if (sig->z != 0) {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate z tag");
@@ -920,7 +920,7 @@ dkim_signature_parse_z(struct signature *sig, const char *start, const char *end
 }
 
 void
-dkim_signature_verify(struct signature *sig)
+dkim_signature_verify(struct dkim_signature *sig)
 {
 	struct message *msg = sig->header->msg;
 	static EVP_MD_CTX *bctx = NULL;
@@ -934,7 +934,7 @@ dkim_signature_verify(struct signature *sig)
 
 	if (bctx == NULL) {
 		if ((bctx = EVP_MD_CTX_new()) == NULL) {
-			dkim_errx(msg, "EVP_MD_CTX_new");
+			auth_errx(msg, "EVP_MD_CTX_new");
 			return;
 		}
 	}
@@ -942,12 +942,12 @@ dkim_signature_verify(struct signature *sig)
 	if (!sig->sephash) {
 		if (EVP_DigestVerifyInit(bctx, NULL, sig->ah, NULL,
 		    sig->p) != 1) {
-			dkim_errx(msg, "EVP_DigestVerifyInit");
+			auth_errx(msg, "EVP_DigestVerifyInit");
 			return;
 		}
 	} else {
 		if (EVP_DigestInit_ex(bctx, sig->ah, NULL) != 1) {
-			dkim_errx(msg, "EVP_DigestInit_ex");
+			auth_errx(msg, "EVP_DigestInit_ex");
 			return;
 		}
 	}
@@ -977,11 +977,11 @@ dkim_signature_verify(struct signature *sig)
 			dkim_signature_state(sig, DKIM_FAIL, "b mismatch");
 	} else {
 		if (EVP_DigestFinal_ex(bctx, digest, &digestsz) == 0) {
-			dkim_errx(msg, "EVP_DigestFinal_ex");
+			auth_errx(msg, "EVP_DigestFinal_ex");
 			return;
 		}
 		if (EVP_DigestVerifyInit(bctx, NULL, NULL, NULL, sig->p) != 1) {
-			dkim_errx(msg, "EVP_DigestVerifyInit");
+			auth_errx(msg, "EVP_DigestVerifyInit");
 			return;
 		}
 		switch (EVP_DigestVerify(bctx, sig->b, sig->bsz, digest,
@@ -992,7 +992,7 @@ dkim_signature_verify(struct signature *sig)
 			dkim_signature_state(sig, DKIM_FAIL, "b mismatch");
 			break;
 		default:
-			dkim_errx(msg, "EVP_DigestVerify");
+			auth_errx(msg, "EVP_DigestVerify");
 			return;
 		}
 	}
@@ -1004,7 +1004,7 @@ dkim_signature_verify(struct signature *sig)
 	    EVP_DigestVerifyUpdate((a), (b), (c)))
 
 void
-dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
+dkim_signature_header(EVP_MD_CTX *bctx, struct dkim_signature *sig,
     struct header *header)
 {
 	char c;
@@ -1026,7 +1026,7 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 					    ptr + 1, 1) - 1;
 			}
 			if (dkim_b_digest_update(bctx, &c, 1) == 0) {
-				dkim_errx(sig->header->msg,
+				auth_errx(sig->header->msg,
 				    "dkim_b_digest_update");
 				return;
 			}
@@ -1040,7 +1040,7 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 				continue;
 			}
 			if (dkim_b_digest_update(bctx, ptr, 1) == 0) {
-				dkim_errx(sig->header->msg,
+				auth_errx(sig->header->msg,
 				    "dkim_b_digest_update");
 				return;
 			}
@@ -1049,14 +1049,14 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 				if (end[0] == '\0')
 					continue;
 				if (dkim_b_digest_update(bctx, " ", 1) == 0) {
-					dkim_errx(sig->header->msg,
+					auth_errx(sig->header->msg,
 					    "dkim_b_digest_update");
 					return;
 				}
 			} else {
 				if (dkim_b_digest_update(bctx, ptr,
 				    end - ptr) == 0) {
-					dkim_errx(sig->header->msg,
+					auth_errx(sig->header->msg,
 					    "dkim_b_digest_update");
 					return;
 				}
@@ -1067,14 +1067,14 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 	}
 	if (sig->header != header) {
 		if (dkim_b_digest_update(bctx, "\r\n", 2) == 0) {
-			dkim_errx(sig->header->msg, "dkim_b_digest_update");
+			auth_errx(sig->header->msg, "dkim_b_digest_update");
 			return;
 		}
 	}
 }
 
 void
-dkim_signature_state(struct signature *sig, enum state state,
+dkim_signature_state(struct dkim_signature *sig, enum dkim_state state,
     const char *reason)
 {
 	if (sig->query != NULL) {
@@ -1109,7 +1109,7 @@ dkim_signature_state(struct signature *sig, enum state state,
 }
 
 const char *
-dkim_state2str(enum state state)
+dkim_state2str(enum dkim_state state)
 {
 	switch (state)
 	{
@@ -1133,7 +1133,7 @@ dkim_state2str(enum state state)
 void
 dkim_rr_resolve(struct asr_result *ar, void *arg)
 {
-	struct signature *sig = arg;
+	struct dkim_signature *sig = arg;
 	char key[UINT16_MAX + 1];
 	const char *rr_txt;
 	size_t keylen, cstrlen;
@@ -1200,11 +1200,11 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 	}
  verify:
 	free(ar->ar_data);
-	dkim_message_verify(sig->header->msg);
+	auth_message_verify(sig->header->msg);
 }
 
 int
-dkim_key_text_parse(struct signature *sig, const char *key)
+dkim_key_text_parse(struct dkim_signature *sig, const char *key)
 {
 	char tagname, *hashname;
 	const char *end, *tagvend;
@@ -1262,7 +1262,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 					break;
 				hashname = strndup(key, tagvend - key);
 				if (hashname == NULL) {
-					dkim_err(sig->header->msg, "malloc");
+					auth_err(sig->header->msg, "malloc");
 					return 0;
 				}
 				if (EVP_get_digestbyname(hashname) == sig->ah) {
@@ -1422,7 +1422,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 		pkoff += strlcpy(pkimp + pkoff, "-----END PUBLIC KEY-----\n",
 		    sizeof(pkimp) - pkoff);
 		if ((bio = BIO_new_mem_buf(pkimp, pkoff)) == NULL) {
-			dkim_err(sig->header->msg, "BIO_new_mem_buf");
+			auth_err(sig->header->msg, "BIO_new_mem_buf");
 			return 1;
 		}
 		sig->p = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
@@ -1458,7 +1458,7 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 void
 dkim_body_parse(struct message *msg, const char *line)
 {
-	struct signature *sig;
+	struct dkim_signature *sig;
 	const char *end = line, *hash, *prev;
 	size_t hashn, len, i;
 	int wsp, ret;
@@ -1476,7 +1476,7 @@ dkim_body_parse(struct message *msg, const char *line)
 			hashn = sig->l == -1 ? 2 : MIN(2, sig->l);
 			sig->l -= sig->l == -1 ? 0 : hashn;
 			if (EVP_DigestUpdate(sig->bhctx, "\r\n", hashn) == 0) {
-				dkim_errx(msg, "EVP_DigestUpdate");
+				auth_errx(msg, "EVP_DigestUpdate");
 				return;
 			}
 		}
@@ -1513,7 +1513,7 @@ dkim_body_parse(struct message *msg, const char *line)
 			sig->l -= sig->l == -1 ? 0 : hashn;
 			ret = EVP_DigestUpdate(sig->bhctx, hash, hashn);
 			if (ret == 0) {
-				dkim_errx(msg, "EVP_DigestUpdate");
+				auth_errx(msg, "EVP_DigestUpdate");
 				return;
 			}
 		}
@@ -1527,14 +1527,14 @@ dkim_body_parse(struct message *msg, const char *line)
 		sig->l -= sig->l == -1 ? 0 : hashn;
 		ret = EVP_DigestUpdate(sig->bhctx, "\r\n", hashn);
 		if (ret == 0) {
-			dkim_errx(msg, "EVP_DigestUpdate");
+			auth_errx(msg, "EVP_DigestUpdate");
 			return;
 		}
 	}
 }
 
 void
-dkim_body_verify(struct signature *sig)
+dkim_body_verify(struct dkim_signature *sig)
 {
 	unsigned char digest[EVP_MAX_MD_SIZE];
 	unsigned int digestsz;
@@ -1546,7 +1546,7 @@ dkim_body_verify(struct signature *sig)
 	    !sig->header->msg->has_body) {
 		if (EVP_DigestUpdate(sig->bhctx, "\r\n",
 		    sig->l == -1 ? 2 : MIN(2, sig->l)) <= 0) {
-			dkim_errx(sig->header->msg,
+			auth_errx(sig->header->msg,
 			    "Can't update hash context");
 			return;
 		}
@@ -1558,7 +1558,7 @@ dkim_body_verify(struct signature *sig)
 	}
 
 	if (EVP_DigestFinal_ex(sig->bhctx, digest, &digestsz) == 0) {
-		dkim_errx(sig->header->msg, "EVP_DigestFinal_ex");
+		auth_errx(sig->header->msg, "EVP_DigestFinal_ex");
 		return;
 	}
 
@@ -1567,9 +1567,9 @@ dkim_body_verify(struct signature *sig)
 }
 
 void
-dkim_message_verify(struct message *msg)
+auth_message_verify(struct message *msg)
 {
-	struct signature *sig;
+	struct dkim_signature *sig;
 	size_t i;
 	ssize_t n, aroff = 0;
 	int found = 0;
@@ -1589,9 +1589,9 @@ dkim_message_verify(struct message *msg)
 		dkim_signature_state(msg->header[i].sig, DKIM_PASS, NULL);
 	}
 	
-	if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
+	if ((aroff = auth_ar_cat(&line, &linelen, aroff,
 	    "Authentication-Results: %s", authservid)) == -1) {
-		dkim_err(msg, "malloc");
+		auth_err(msg, "malloc");
 		goto fail;
 	}
 	for (i = 0; i < msg->nheaders; i++) {
@@ -1599,29 +1599,29 @@ dkim_message_verify(struct message *msg)
 		if (sig == NULL)
 			continue;
 		found = 1;
-		if ((aroff = dkim_ar_cat(&line, &linelen, aroff, "; dkim=%s",
+		if ((aroff = auth_ar_cat(&line, &linelen, aroff, "; dkim=%s",
 		    dkim_state2str(sig->state))) == -1) {
-			dkim_err(msg, "malloc");
+			auth_err(msg, "malloc");
 			goto fail;
 		}
 		if (sig->state_reason != NULL) {
-			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
+			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
 			    " reason=\"%s\"", sig->state_reason)) == -1) {
-				dkim_err(msg, "malloc");
+				auth_err(msg, "malloc");
 				goto fail;
 			}
 		}
 		if (sig->s[0] != '\0') {
-			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
+			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
 			    " header.s=%s", sig->s)) == -1) {
-				dkim_err(msg, "malloc");
+				auth_err(msg, "malloc");
 				goto fail;
 			}
 		}
 		if (sig->d[0] != '\0') {
-			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
+			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
 			    " header.d=%s", sig->d)) == -1) {
-				dkim_err(msg, "malloc");
+				auth_err(msg, "malloc");
 				goto fail;
 			}
 		}
@@ -1630,21 +1630,21 @@ dkim_message_verify(struct message *msg)
 		 * which can contain FWS and CFWS.
 		 */
 		if (sig->a != NULL) {
-			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
+			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
 			    " header.a=%.*s", (int)sig->asz, sig->a)) == -1) {
-				dkim_err(msg, "malloc");
+				auth_err(msg, "malloc");
 				goto fail;
 			}
 		}
 	}
 	if (!found) {
-		aroff = dkim_ar_cat(&line, &linelen, aroff, "; dkim=none");
+		aroff = auth_ar_cat(&line, &linelen, aroff, "; dkim=none");
 		if (aroff == -1) {
-			dkim_err(msg, "malloc");
+			auth_err(msg, "malloc");
 			goto fail;
 		}
 	}
-	dkim_ar_print(msg->ctx, line);
+	auth_ar_print(msg->ctx, line);
 
 	rewind(msg->origf);
 	while ((n = getline(&line, &linelen, msg->origf)) != -1) {
@@ -1652,14 +1652,14 @@ dkim_message_verify(struct message *msg)
 		osmtpd_filter_dataline(msg->ctx, "%s", line);
 	}
 	if (ferror(msg->origf))
-		dkim_err(msg, "getline");
+		auth_err(msg, "getline");
  fail:
 	free(line);
 	return;
 }
 
 void
-dkim_ar_print(struct osmtpd_ctx *ctx, const char *start)
+auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 {
 	const char *scan, *checkpoint, *ncheckpoint;
 	size_t arlen = 0;
@@ -1713,7 +1713,7 @@ dkim_ar_print(struct osmtpd_ctx *ctx, const char *start)
 }
 
 ssize_t
-dkim_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
+auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 {
 	va_list ap;
 	char *artmp;
@@ -1738,14 +1738,14 @@ dkim_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 }
 
 void
-dkim_err(struct message *msg, char *text)
+auth_err(struct message *msg, char *text)
 {
 	msg->err = 1;
 	fprintf(stderr, "%s: %s\n", text, strerror(errno));
 }
 
 void
-dkim_errx(struct message *msg, char *text)
+auth_errx(struct message *msg, char *text)
 {
 	msg->err = 1;
 	fprintf(stderr, "%s\n", text);
@@ -1754,6 +1754,6 @@ dkim_errx(struct message *msg, char *text)
 __dead void
 usage(void)
 {
-	fprintf(stderr, "usage: filter-dkimverify\n");
+	fprintf(stderr, "usage: filter-auth\n");
 	exit(1);
 }
