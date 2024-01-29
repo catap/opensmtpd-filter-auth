@@ -969,6 +969,7 @@ dkim_signature_verify(struct signature *sig)
 				continue;
 			dkim_signature_header(bctx, sig, &(msg->header[i]));
 			msg->header[i].parsed = 1;
+			break;
 		}
 	}
 	dkim_signature_header(bctx, sig, sig->header);
