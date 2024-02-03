@@ -1,5 +1,8 @@
 /*
+ * Copyright (c) 2024 Kirill A. Korinsky <kirill@korins.ky>
  * Copyright (c) 2022 Martijn van Duren <martijn@openbsd.org>
+ * Copyright (c) 2019 Martijn van Duren <martijn@openbsd.org>
+ * Copyright (c) 2017 Gilles Chehade <gilles@poolp.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -31,6 +34,7 @@
 #include <opensmtpd.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -111,6 +115,54 @@ enum iprev_state {
 	IPREV_FAIL
 };
 
+/*
+ * Base on RFC7208
+ */
+enum spf_state {
+	SPF_NONE,
+	SPF_NEUTRAL,
+	SPF_PASS,
+	SPF_FAIL,
+	SPF_SOFTFAIL,
+	SPF_TEMPERROR,
+	SPF_PERMERROR
+};
+
+/*
+ * RFC 5321 doesn't limit record size, enforce some resanable limit
+ */
+#define SPF_RECORD_MAX 4096
+
+struct spf_query {
+	struct spf_record *spf;
+	struct event_asr *eva;
+	int type;
+	enum spf_state q;
+	int include;
+	int exists;
+	char *domain;
+	char *txt;
+	int pos;
+};
+
+struct spf_record {
+	struct osmtpd_ctx *ctx;
+	enum spf_state state;
+	const char *state_reason;
+	char *sender_local;
+	char *sender_domain;
+	int nqueries;
+	int running;
+	int done;
+/* RFC 7208 Section 4.6.4 limits to 10 DNS lookup,
+ * and one is reserved for the first query.
+ * To prevent of infinity loop I count each CNAME
+ * as dedicated lookup, same as A and AAAA.
+ * So, I use 41 as the limit. */
+#define SPF_DNS_LOOKUP_LIMIT 41
+	struct spf_query queries[SPF_DNS_LOOKUP_LIMIT];
+};
+
 struct header {
 	struct message *msg;
 	uint8_t readdone;
@@ -132,17 +184,27 @@ struct message {
 	struct header *header;
 	size_t nheaders;
 	int readdone;
+	int nqueries;
 };
 
 struct session {
 	struct osmtpd_ctx *ctx;
 	enum iprev_state iprev;
+	struct spf_record *spf_helo;
+	struct spf_record *spf_mailfrom;
+	struct sockaddr_storage src;
+	char *identity;
+	char *rdns;
 };
 
 void usage(void);
 void auth_conf(const char *, const char *);
 void auth_connect(struct osmtpd_ctx *, const char *, enum osmtpd_status, struct sockaddr_storage *, struct sockaddr_storage *);
+void spf_identity(struct osmtpd_ctx *, const char *);
+void spf_mailfrom(struct osmtpd_ctx *, const char *);
 void auth_dataline(struct osmtpd_ctx *, const char *);
+void *spf_record_new(struct osmtpd_ctx *, const char *);
+void spf_record_free(struct spf_record *);
 void *auth_session_new(struct osmtpd_ctx *);
 void auth_session_free(struct osmtpd_ctx *, void *);
 void *auth_message_new(struct osmtpd_ctx *);
@@ -173,7 +235,24 @@ void dkim_body_parse(struct message *, const char *);
 void dkim_body_verify(struct dkim_signature *);
 void dkim_rr_resolve(struct asr_result *, void *);
 const char *iprev_state2str(enum iprev_state);
+char *spf_evaluate_domain(struct spf_record *, const char *);
+void spf_lookup_record(struct spf_record *, const char *, int,
+    enum spf_state, int, int);
+void spf_done(struct spf_record *, enum spf_state, const char *);
+void spf_resolve(struct asr_result *, void *);
+void spf_resolve_txt(struct dns_rr *, struct spf_query *);
+void spf_resolve_mx(struct dns_rr *, struct spf_query *);
+void spf_resolve_a(struct dns_rr *, struct spf_query *);
+void spf_resolve_aaaa(struct dns_rr *, struct spf_query *);
+void spf_resolve_cname(struct dns_rr *, struct spf_query *);
+char* spf_parse_txt(const char *, size_t);
+int spf_check_cidr(struct spf_record *, struct in_addr *, int );
+int spf_check_cidr6(struct spf_record *, struct in6_addr *, int );
+int spf_execute_txt(struct spf_query *);
+const char *spf_state2str(enum spf_state);
+int spf_ar_cat(const char *, struct spf_record *, char **, size_t *, ssize_t *);
 void auth_message_verify(struct message *);
+void auth_ar_create(struct osmtpd_ctx *);
 ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
     __attribute__((__format__ (printf, 4, 5)));
 int auth_ar_print(struct osmtpd_ctx *, const char *);
@@ -196,10 +275,13 @@ main(int argc, char *argv[])
 	if ((ectx = EVP_ENCODE_CTX_new()) == NULL)
 		osmtpd_err(1, "EVP_ENCODE_CTX_new");
 
-	osmtpd_need(OSMTPD_NEED_FCRDNS);
+	osmtpd_need(OSMTPD_NEED_SRC|OSMTPD_NEED_FCRDNS|OSMTPD_NEED_IDENTITY|OSMTPD_NEED_GREETING);
 	osmtpd_register_conf(auth_conf);
 	osmtpd_register_filter_dataline(auth_dataline);
 	osmtpd_register_report_connect(1, auth_connect);
+	osmtpd_register_filter_helo(spf_identity);
+	osmtpd_register_filter_ehlo(spf_identity);
+	osmtpd_register_filter_mailfrom(spf_mailfrom);
 	osmtpd_local_session(auth_session_new, auth_session_free);
 	osmtpd_local_message(auth_message_new, auth_message_free);
 	osmtpd_run();
@@ -236,6 +318,56 @@ auth_connect(struct osmtpd_ctx *ctx, const char *rdns, enum osmtpd_status fcrdns
 		ses->iprev = IPREV_PASS;
 	else
 		ses->iprev = IPREV_FAIL;
+
+	memcpy(&ses->src, src, sizeof(struct sockaddr_storage));
+
+	if (rdns != NULL) {
+		if ((ses->rdns = strdup(rdns)) == NULL)
+			osmtpd_err(1, "%s: malloc", __func__);
+	}
+}
+
+void
+spf_identity(struct osmtpd_ctx *ctx, const char *identity)
+{
+	char from[HOST_NAME_MAX + 12];
+
+	struct session *ses = ctx->local_session;
+
+	if (identity == NULL) {
+		osmtpd_filter_proceed(ctx);
+		return;
+	}
+
+	if ((ses->identity = strdup(identity)) == NULL)
+		osmtpd_err(1, "%s: strdup", __func__);
+
+	if (strlen(identity) == 0) {
+		osmtpd_filter_proceed(ctx);
+		return;
+	}
+
+	snprintf(from, sizeof(from), "postmaster@%s", identity);
+
+	if ((ses->spf_helo = spf_record_new(ctx, from)) == NULL)
+		osmtpd_filter_proceed(ctx);
+}
+
+void
+spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
+{
+	struct session *ses = ctx->local_session;
+
+	if (from == NULL || !strlen(from)) {
+		osmtpd_filter_proceed(ctx);
+		return;
+	}
+
+	if (ses->spf_mailfrom)
+		spf_record_free(ses->spf_mailfrom);
+
+	if ((ses->spf_mailfrom = spf_record_new(ctx, from)) == NULL)
+		osmtpd_filter_proceed(ctx);
 }
 
 void
@@ -279,6 +411,81 @@ auth_dataline(struct osmtpd_ctx *ctx, const char *line)
 }
 
 void *
+spf_record_new(struct osmtpd_ctx *ctx, const char *from)
+{
+	int i;
+	const char *at;
+	struct spf_record *spf;
+
+	if ((spf = malloc(sizeof(*spf))) == NULL)
+		osmtpd_err(1, "%s: malloc", __func__);
+
+	spf->ctx = ctx;
+	spf->state = SPF_NONE;
+	spf->state_reason = NULL;
+	spf->nqueries = 0;
+	spf->running = 0;
+	spf->done = 0;
+
+	for (i = 0; i < SPF_DNS_LOOKUP_LIMIT; i++) {
+		spf->queries[i].domain = NULL;
+		spf->queries[i].txt = NULL;
+		spf->queries[i].eva = NULL;
+	}
+
+	from = osmtpd_ltok_skip_cfws(from, 1);
+
+	if ((at = osmtpd_ltok_skip_local_part(from, 0)) == NULL)
+		goto fail;
+
+	if ((spf->sender_local = strndup(from, at - from)) == NULL)
+		osmtpd_err(1, "%s: malloc", __func__);
+
+	if (*at != '@')
+		goto fail_local;
+	at++;
+
+	if ((from = osmtpd_ltok_skip_domain(at, 0)) == NULL)
+		goto fail_local;
+
+
+	if ((spf->sender_domain = strndup(at, from - at)) == NULL)
+		osmtpd_err(1, "%s: malloc", __func__);
+
+	spf_lookup_record(
+		spf, spf->sender_domain, T_TXT, SPF_PASS, 0, 0);
+
+	return spf;
+
+fail_local:
+	free(spf->sender_local);
+
+fail:
+	free(spf);
+	return NULL;
+}
+
+void
+spf_record_free(struct spf_record *spf)
+{
+	int i;
+
+	for (i = 0; i < SPF_DNS_LOOKUP_LIMIT; i++) {
+		if (spf->queries[i].domain)
+			free(spf->queries[i].domain);
+		if (spf->queries[i].txt)
+			free(spf->queries[i].txt);
+		if (spf->queries[i].eva)
+			event_asr_abort(spf->queries[i].eva);
+	}
+
+	free(spf->sender_local);
+	free(spf->sender_domain);
+
+	free(spf);
+}
+
+void *
 auth_session_new(struct osmtpd_ctx *ctx)
 {
 	struct session *ses;
@@ -289,6 +496,12 @@ auth_session_new(struct osmtpd_ctx *ctx)
 	ses->ctx = ctx;
 	ses->iprev = IPREV_NONE;
 
+	ses->spf_helo = NULL;
+	ses->spf_mailfrom = NULL;
+
+	ses->identity = NULL;
+	ses->rdns = NULL;
+
 	return ses;
 }
 
@@ -296,6 +509,15 @@ void
 auth_session_free(struct osmtpd_ctx *ctx, void *data)
 {
 	struct session *ses = data;
+
+	if (ses->spf_helo)
+		spf_record_free(ses->spf_helo);
+	if (ses->spf_mailfrom)
+		spf_record_free(ses->spf_mailfrom);
+	if (ses->identity)
+		free(ses->identity);
+	if (ses->rdns)
+		free(ses->rdns);
 
 	free(ses);
 }
@@ -320,6 +542,7 @@ auth_message_new(struct osmtpd_ctx *ctx)
 	msg->header = NULL;
 	msg->nheaders = 0;
 	msg->readdone = 0;
+	msg->nqueries = 0;
 
 	return msg;
 }
@@ -559,12 +782,15 @@ dkim_lookup_record(struct dkim_signature *sig, const char *domain)
 	if (sig->query != NULL) {
 		event_asr_abort(sig->query);
 		sig->query = NULL;
+		sig->header->msg->nqueries--;
 	}
 	if ((query = res_query_async(domain, C_IN, T_TXT, NULL)) == NULL)
 		osmtpd_err(1, "res_query_async");
 
 	if ((sig->query = event_asr_run(query, dkim_rr_resolve, sig)) == NULL)
 		osmtpd_err(1, "res_query_async");
+
+	sig->header->msg->nqueries++;
 }
 
 void
@@ -1109,6 +1335,7 @@ dkim_signature_state(struct dkim_signature *sig, enum dkim_state state,
 	if (sig->query != NULL) {
 		event_asr_abort(sig->query);
 		sig->query = NULL;
+		sig->header->msg->nqueries--;
 	}
 	switch (sig->state) {
 	case DKIM_UNKNOWN:
@@ -1173,6 +1400,7 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 	char buf[HOST_NAME_MAX + 1];
 
 	sig->query = NULL;
+	sig->header->msg->nqueries--;
 
 	if (sig->state != DKIM_UNKNOWN)
 		goto verify;
@@ -1624,18 +1852,784 @@ iprev_state2str(enum iprev_state state)
 	}
 }
 
+char *
+spf_evaluate_domain(struct spf_record *spf, const char *domain)
+{
+	struct session *ses = spf->ctx->local_session;
+
+	char spec[HOST_NAME_MAX + 1];
+	char macro[HOST_NAME_MAX + 1], smacro[sizeof(macro)];
+	char delimiters[sizeof(".-+,/_=")];
+	char *endptr, *tmp;
+	const u_char *addr;
+	size_t i, mlen;
+	long digits;
+	int reverse;
+
+	if (domain == NULL || domain[0] == '\0') {
+		spf_done(spf, SPF_PERMERROR, "Empty domain");
+		return NULL;
+	}
+
+	for (i = 0;
+	     domain[0] != ' ' && domain[0] != '\0' && i < sizeof(spec);
+	     domain++) {
+
+		if (domain[0] < 0x21 || domain[0] > 0x7e) {
+			spf_done(
+			    spf, SPF_PERMERROR, "Invalid character in domain-spec");
+			return NULL;
+		}
+
+		if (domain[0] != '%') {
+			spec[i++] = domain[0];
+			continue;
+		}
+		domain++;
+
+		switch (domain[0]) {
+		case '%':
+			spec[i++] = '%';
+			break;
+		case '_':
+			spec[i++] = ' ';
+			break;
+		case '-':
+			if (i + 3 >= sizeof(spec)) {
+				spf_done(
+				    spf, SPF_PERMERROR, "domain-spec too large");
+				return NULL;
+			}
+
+			spec[i++] = '%';
+			spec[i++] = '2';
+			spec[i++] = '0';
+			break;
+		case '{':
+			domain++;
+			digits = -1;
+			reverse = 0;
+			delimiters[0] = '\0';
+
+			switch (domain[0]) {
+			case 'S':
+			case 's':
+				mlen = (size_t) snprintf(macro, sizeof(macro),
+				    "%s@%s", spf->sender_local,
+				    spf->sender_domain);
+				break;
+			case 'L':
+			case 'l':
+				mlen = strlcpy(macro,
+				    spf->sender_local, sizeof(macro));
+				break;
+			case 'O':
+			case 'o':
+				mlen = strlcpy(macro,
+				    spf->sender_domain,
+				    sizeof(macro));
+				break;
+			case 'D':
+			case 'd':
+				if (spf->nqueries < 1) {
+					spf_done(spf, SPF_PERMERROR,
+					    "no domain for d macro");
+					return NULL;
+				}
+				mlen = strlcpy(macro,
+				    spf->queries[spf->nqueries - 1].domain,
+				    sizeof(macro));
+				break;
+			case 'I':
+			case 'i':
+				if (ses->src.ss_family == AF_INET) {
+					addr = (u_char *)(&((struct sockaddr_in *)
+					    &(ses->src))->sin_addr);
+					mlen = snprintf(macro, sizeof(macro),
+					    "%u.%u.%u.%u",
+					    (addr[0] & 0xff), (addr[1] & 0xff),
+					    (addr[2] & 0xff), (addr[3] & 0xff));
+				} else if (ses->src.ss_family == AF_INET6) {
+					addr = (u_char *)(&((struct sockaddr_in6 *)
+					    &(ses->src))->sin6_addr);
+					mlen = snprintf(macro, sizeof(macro),
+					    "%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx."
+					    "%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx."
+					    "%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx."
+					    "%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx",
+					    (u_char) ((addr[0] >> 4) & 0x0f), (u_char) (addr[0] & 0x0f),
+					    (u_char) ((addr[1] >> 4) & 0x0f), (u_char) (addr[1] & 0x0f),
+					    (u_char) ((addr[2] >> 4) & 0x0f), (u_char) (addr[2] & 0x0f),
+					    (u_char) ((addr[3] >> 4) & 0x0f), (u_char) (addr[3] & 0x0f),
+					    (u_char) ((addr[4] >> 4) & 0x0f), (u_char) (addr[4] & 0x0f),
+					    (u_char) ((addr[5] >> 4) & 0x0f), (u_char) (addr[5] & 0x0f),
+					    (u_char) ((addr[6] >> 4) & 0x0f), (u_char) (addr[6] & 0x0f),
+					    (u_char) ((addr[7] >> 4) & 0x0f), (u_char) (addr[7] & 0x0f),
+					    (u_char) ((addr[8] >> 4) & 0x0f), (u_char) (addr[8] & 0x0f),
+					    (u_char) ((addr[9] >> 4) & 0x0f), (u_char) (addr[9] & 0x0f),
+					    (u_char) ((addr[10] >> 4) & 0x0f), (u_char) (addr[10] & 0x0f),
+					    (u_char) ((addr[11] >> 4) & 0x0f), (u_char) (addr[11] & 0x0f),
+					    (u_char) ((addr[12] >> 4) & 0x0f), (u_char) (addr[12] & 0x0f),
+					    (u_char) ((addr[13] >> 4) & 0x0f), (u_char) (addr[13] & 0x0f),
+					    (u_char) ((addr[14] >> 4) & 0x0f), (u_char) (addr[14] & 0x0f),
+					    (u_char) ((addr[15] >> 4) & 0x0f), (u_char) (addr[15] & 0x0f));
+				} else {
+					spf_done(spf, SPF_PERMERROR,
+					    "unsupported type of address");
+					return NULL;
+				}
+				break;
+			case 'P':
+			case 'p':
+				mlen = strlcpy(macro, ses->rdns, sizeof(macro));
+				break;
+			case 'V':
+			case 'v':
+				if (ses->src.ss_family == AF_INET)
+					mlen = strlcpy(macro, "in-addr",
+					    sizeof(macro));
+				else if (ses->src.ss_family == AF_INET6)
+					mlen = strlcpy(macro, "ip6",
+					    sizeof(macro));
+				else {
+					spf_done(spf, SPF_PERMERROR,
+					    "unsupported type of address");
+					return NULL;
+				}
+				break;
+			case 'H':
+			case 'h':
+				mlen = strlcpy(macro, ses->identity,
+				    sizeof(macro));
+				break;
+			default:
+				spf_done(spf, SPF_PERMERROR,
+				    "Unexpected macro in domain-spec");
+				return NULL;
+			}
+
+			if (mlen >= sizeof(macro)) {
+				spf_done(spf, SPF_PERMERROR,
+				    "Macro expansions too large");
+				return NULL;
+			}
+
+			domain++;
+			if (isdigit(domain[0])) {
+				digits = strtol(domain, &endptr, 10);
+				if (digits < 1) {
+					spf_done(spf, SPF_PERMERROR,
+					    "digits in macro can't be 0");
+					return NULL;
+				}
+				domain = endptr;
+			}
+
+			if (domain[0] == 'r') {
+				domain++;
+				reverse = 1;
+			}
+
+			for (; strchr(".-+,/_=", domain[0]) != NULL; domain++) {
+				if (strchr(delimiters, domain[0]) == NULL) {
+					delimiters[strlen(delimiters) + 1] = '\0';
+					delimiters[strlen(delimiters)] = domain[0];
+				}
+			}
+
+			if (delimiters[0] == '\0') {
+				delimiters[0] = '.';
+				delimiters[1] = '\0';
+			}
+
+			if (domain[0] != '}') {
+				spf_done(spf, SPF_PERMERROR,
+				    "Mallformed macro, expected end");
+				return NULL;
+			}
+
+			if (reverse) {
+				smacro[0] = '\0';
+				tmp = macro + strlen(macro) - 1;
+				/*
+				 * DIGIT rightmost elements after reversal is DIGIT
+				 * lefmost elements before reversal
+				 */
+				while (1) {
+					while (tmp > macro &&
+					    strchr(delimiters, tmp[0]) == NULL)
+						tmp--;
+					if (tmp == macro)
+						break;
+					if (digits == 0)
+						break;
+					if (digits > 0)
+						digits--;
+
+					tmp[0] = '\0';
+					if (smacro[0] != '\0')
+						strlcat(smacro, ".", sizeof(smacro));
+					strlcat(smacro, tmp + 1, sizeof(smacro));
+					tmp--;
+				}
+				if (digits != 0) {
+					if (smacro[0] != '\0')
+						strlcat(smacro, ".", sizeof(smacro));
+					strlcat(smacro, macro, sizeof(smacro));
+				}
+			} else {
+				if (digits != -1) {
+					tmp = macro;
+					endptr = macro + strlen(macro);
+					while (digits > 0) {
+						while (tmp < endptr &&
+						    strchr(delimiters, tmp[0]) == NULL)
+							tmp++;
+						if (tmp == endptr)
+							break;
+						if (digits == 1) {
+							tmp[0] = '\0';
+							break;
+						}
+						digits--;
+						tmp++;
+					}
+				}
+				strlcpy(smacro, macro, sizeof(smacro));
+			}
+
+			spec[i] = '\0';
+			i = strlcat(spec, smacro, sizeof(spec));
+			if (i >= sizeof(spec)) {
+				spf_done(
+				    spf, SPF_PERMERROR, "domain-spec too large");
+				return NULL;
+			}
+			break;
+
+		default:
+			spf_done(spf, SPF_PERMERROR,
+			    "Mallformed macro, unexpected character after %");
+			return NULL;
+		}
+	}
+
+	if ((tmp = strndup(spec, i)) == NULL)
+		osmtpd_err(1, "%s: strndup", __func__);
+
+	return tmp;
+}
+
+void
+spf_lookup_record(struct spf_record *spf, const char *domain, int type,
+    enum spf_state qualifier, int include, int exists)
+{
+	struct asr_query *aq;
+	struct spf_query *query;
+
+	if (spf->done)
+		return;
+
+	if (spf->nqueries >= SPF_DNS_LOOKUP_LIMIT) {
+		spf_done(spf, SPF_PERMERROR, "To many DNS queries");
+		return;
+	}
+
+	query = &spf->queries[spf->nqueries];
+	query->spf = spf;
+	query->type = type;
+	query->q = qualifier;
+	query->include = include;
+	query->exists = exists;
+	query->txt = NULL;
+	query->eva = NULL;
+
+	if ((query->domain = spf_evaluate_domain(spf, domain)) == NULL)
+		return;
+
+	if (domain == NULL || !strlen(domain)) {
+		spf_done(spf, SPF_PERMERROR, "Empty domain");
+		return;
+	}
+
+	if ((aq = res_query_async(query->domain, C_IN, type, NULL)) == NULL)
+		osmtpd_err(1, "res_query_async");
+
+	if ((query->eva = event_asr_run(aq, spf_resolve, query)) == NULL)
+		osmtpd_err(1, "event_asr_run");
+
+	spf->running++;
+	spf->nqueries++;
+}
+
+void
+spf_resolve(struct asr_result *ar, void *arg)
+{
+	int i;
+
+	struct spf_query *query = arg;
+	struct spf_record *spf = query->spf;
+	struct unpack pack;
+	struct dns_header h;
+	struct dns_query q;
+	struct dns_rr rr;
+	char buf[HOST_NAME_MAX + 1];
+
+	query->eva = NULL;
+	query->spf->running--;
+
+	if (ar->ar_h_errno == TRY_AGAIN
+	    || ar->ar_h_errno == NO_RECOVERY) {
+		spf_done(query->spf, SPF_TEMPERROR, hstrerror(ar->ar_h_errno));
+		goto end;
+	}
+
+	if (ar->ar_h_errno == HOST_NOT_FOUND) {
+		if (query->include && !query->exists)
+			spf_done(query->spf,
+			    SPF_PERMERROR, hstrerror(ar->ar_h_errno));
+		goto consume;
+	}
+
+	unpack_init(&pack, ar->ar_data, ar->ar_datalen);
+	if (unpack_header(&pack, &h) != 0 ||
+	    unpack_query(&pack, &q) != 0) {
+		osmtpd_warn(query->spf->ctx,
+		    "Mallformed SPF DNS response for domain %s: %s",
+		    print_dname(q.q_dname, buf, sizeof(buf)),
+		    pack.err);
+		spf_done(query->spf, SPF_TEMPERROR, pack.err);
+		goto end;
+	}
+
+	for (; h.ancount; h.ancount--) {
+		if (unpack_rr(&pack, &rr) != 0) {
+			osmtpd_warn(query->spf->ctx,
+			    "Mallformed SPF DNS record for domain %s: %s",
+			    print_dname(q.q_dname, buf, sizeof(buf)),
+			    pack.err);
+			continue;
+		}
+
+		switch (rr.rr_type)
+		{
+		case T_TXT:
+			spf_resolve_txt(&rr, query);
+			break;
+
+		case T_MX:
+			spf_resolve_mx(&rr, query);
+			break;
+
+		case T_A:
+			spf_resolve_a(&rr, query);
+			break;
+
+		case T_AAAA:
+			spf_resolve_aaaa(&rr, query);
+			break;
+
+		case T_CNAME:
+			spf_resolve_cname(&rr, query);
+			break;
+
+		default:
+			osmtpd_warn(spf->ctx,
+			    "Unexpected SPF DNS record: %d for domain %s",
+			    rr.rr_type, query->domain);
+			spf_done(query->spf, SPF_TEMPERROR, "Unexpected record");
+			break;
+		}
+
+		if (spf->done)
+			goto end;
+	}
+
+ consume:
+	if (spf->running > 0)
+		goto end;
+
+	for (i = spf->nqueries - 1; i >= 0; i--) {
+		if (spf->queries[i].txt != NULL) {
+			if (spf_execute_txt(&spf->queries[i]) != 0)
+				break;
+		}
+	}
+
+ end:
+	free(ar->ar_data);
+	if (!spf->done && spf->running == 0)
+		spf_done(spf, SPF_NONE, NULL);
+}
+
+void
+spf_resolve_txt(struct dns_rr *rr, struct spf_query *query)
+{
+	char *txt;
+	txt = spf_parse_txt(rr->rr.other.rdata, rr->rr.other.rdlen);
+	if (txt == NULL) {
+		osmtpd_warn(NULL, "spf_parse_txt");
+		return;
+	}
+
+	if (strncasecmp("v=spf1 ", txt, 7)) {
+		free(txt);
+		return;
+	}
+
+	if (query->txt != NULL) {
+		free(txt);
+		spf_done(query->spf, SPF_PERMERROR, "Duplicated SPF record");
+		return;
+	}
+
+	query->txt = txt;
+	query->pos = 0;
+	spf_execute_txt(query);
+}
+
+void
+spf_resolve_mx(struct dns_rr *rr, struct spf_query *query)
+{
+	char buf[HOST_NAME_MAX + 1];
+
+	char *domain = print_dname(rr->rr.mx.exchange, buf, sizeof(buf));
+
+	spf_lookup_record(query->spf, domain, T_A,
+	    query->q, query->include, 0);
+	spf_lookup_record(query->spf, domain, T_AAAA,
+	    query->q, query->include, 0);
+}
+
+void
+spf_resolve_a(struct dns_rr *rr, struct spf_query *query)
+{
+	if (query->exists ||
+	    spf_check_cidr(query->spf, &rr->rr.in_a.addr, 32) == 0) {
+		spf_done(query->spf, query->q, NULL);
+	}
+}
+
+void
+spf_resolve_aaaa(struct dns_rr *rr, struct spf_query *query)
+{
+	if (spf_check_cidr6(query->spf, &rr->rr.in_aaaa.addr6, 128) == 0) {
+		spf_done(query->spf, query->q, NULL);
+	}
+}
+
+void
+spf_resolve_cname(struct dns_rr *rr, struct spf_query *query)
+{
+	char buf[HOST_NAME_MAX + 1];
+
+	char *domain = print_dname(rr->rr.cname.cname, buf, sizeof(buf));
+
+	spf_lookup_record(query->spf, domain, query->type,
+	    query->q, query->include, 0);
+}
+
+char *
+spf_parse_txt(const char *rdata, size_t rdatalen)
+{
+	size_t len, dstsz = SPF_RECORD_MAX - 1;
+	ssize_t r = 0;
+	char *dst, *odst;
+
+	if (rdatalen >= dstsz) {
+		errno = EOVERFLOW;
+		return NULL;
+	}
+
+	odst = dst = malloc(dstsz);
+	if (dst == NULL)
+		osmtpd_err(1, "%s: malloc", __func__);
+
+	while (rdatalen) {
+		len = *(const unsigned char *)rdata;
+		if (len >= rdatalen) {
+			errno = EINVAL;
+			return NULL;
+		}
+
+		rdata++;
+		rdatalen--;
+
+		if (len == 0)
+			continue;
+
+		if (len >= dstsz) {
+			errno = EOVERFLOW;
+			return NULL;
+		}
+		memmove(dst, rdata, len);
+		dst += len;
+		dstsz -= len;
+
+		rdata += len;
+		rdatalen -= len;
+		r += len;
+	}
+
+	odst[r] = '\0';
+
+	return odst;
+}
+
+int
+spf_check_cidr(struct spf_record *spf, struct in_addr *net, int bits)
+{
+	struct in_addr *addr;
+	struct session *ses = spf->ctx->local_session;
+
+	if (ses->src.ss_family != AF_INET)
+		return -1;
+
+	if (bits == 0)
+		return 0;
+
+	addr = &(((struct sockaddr_in *)(&ses->src))->sin_addr);
+
+	return ((addr->s_addr ^ net->s_addr) & htonl(0xFFFFFFFFu << (32 - bits)));
+}
+
+int
+spf_check_cidr6(struct spf_record *spf, struct in6_addr *net, int bits)
+{
+	int rc;
+	uint32_t *a, *n, whole, incomplete;
+	struct in6_addr *addr;
+	struct session *ses = spf->ctx->local_session;
+
+	if (ses->src.ss_family != AF_INET6)
+		return -1;
+
+	if (bits == 0)
+		return 0;
+
+	addr = &(((struct sockaddr_in6 *)(&ses->src))->sin6_addr);
+
+	a = addr->__u6_addr.__u6_addr32;
+	n = net->__u6_addr.__u6_addr32;
+
+	whole = bits >> 5;
+	incomplete = bits & 0x1f;
+	if (whole) {
+		rc = memcmp(a, n, whole << 2);
+		if (rc)
+			return rc;
+	}
+	if (incomplete)
+		return (a[whole] ^ n[whole]) & htonl((0xffffffffu) << (32 - incomplete));
+
+	return 0;
+}
+
+int
+spf_execute_txt(struct spf_query *query)
+{
+	struct in_addr ina;
+	struct in6_addr in6a;
+	char *ap = NULL;
+	char *in = query->txt + query->pos;
+	char *end;
+	int bits;
+
+	enum spf_state q = query->q;
+
+	while ((ap = strsep(&in, " ")) != NULL) {
+		if (strcasecmp(ap, "v=spf1") == 0)
+			continue;
+
+		end = ap + strlen(ap)-1;
+		if (*end == '.')
+			*end = '\0';
+
+		if (*ap == '+') {
+			q = SPF_PASS;
+			ap++;
+		} else if (*ap == '-') {
+			q = SPF_FAIL;
+			ap++;
+		} else if (*ap == '~') {
+			q = SPF_SOFTFAIL;
+			ap++;
+		} else if (*ap == '?') {
+			q = SPF_NEUTRAL;
+			ap++;
+		}
+
+		if (q != SPF_PASS && query->include)
+			continue;
+
+		if (strncasecmp("all", ap, 3) == 0) {
+			spf_done(query->spf, q, NULL);
+			return 0;
+		}
+		if (strncasecmp("ip4:", ap, 4) == 0) {
+			if ((bits = inet_net_pton(AF_INET, ap + 4, &ina, sizeof(ina))) == -1)
+				continue;
+
+			if (spf_check_cidr(query->spf, &ina, bits) == 0) {
+				spf_done(query->spf, q, NULL);
+				return 0;
+			}
+			continue;
+		}
+		if (strncasecmp("ip6:", ap, 4) == 0) {
+			if ((bits = inet_net_pton(AF_INET6, ap + 4, &ina, sizeof(ina))) == -1)
+				continue;
+
+			if (spf_check_cidr6(query->spf, &in6a, bits) == 0) {
+				spf_done(query->spf, q, NULL);
+				return 0;
+			}
+			continue;
+		}
+		if (strcasecmp("a", ap) == 0) {
+			spf_lookup_record(query->spf, query->domain, T_A,
+			    q, query->include, 0);
+			spf_lookup_record(query->spf, query->domain, T_AAAA,
+			    q, query->include, 0);
+			break;
+		}
+		if (strncasecmp("a:", ap, 2) == 0) {
+			spf_lookup_record(query->spf, ap + 2, T_A,
+			    q, query->include, 0);
+			spf_lookup_record(query->spf, ap + 2, T_AAAA,
+			    q, query->include, 0);
+			break;
+		}
+		if (strncasecmp("exists:", ap, 7) == 0) {
+			spf_lookup_record(query->spf, ap + 7, T_A,
+			    q, query->include, 1);
+			break;
+		}
+		if (strncasecmp("include:", ap, 8) == 0) {
+			spf_lookup_record(query->spf, ap + 8, T_TXT, q, 1, 0);
+			break;
+		}
+		if (strncasecmp("redirect=", ap, 9) == 0) {
+			if (in != NULL)
+				continue;
+			spf_lookup_record(query->spf, ap + 9, T_TXT,
+			    q, query->include, 0);
+			return 0;
+		}
+		if (strcasecmp("mx", ap) == 0) {
+			spf_lookup_record(query->spf, query->domain, T_MX,
+			    q, query->include, 0);
+			break;
+		}
+		if (strncasecmp("mx:", ap, 3) == 0) {
+			spf_lookup_record(query->spf, ap + 3, T_MX,
+			    q, query->include, 0);
+			break;
+		}
+	}
+
+	if (in == NULL)
+		return 0;
+
+	query->pos = in - query->txt;
+
+	return query->pos;
+}
+
+void
+spf_done(struct spf_record *spf, enum spf_state state, const char *reason)
+{
+	int i;
+
+	if (spf->done)
+		return;
+
+	for (i = 0; i < spf->nqueries; i++) {
+		if (spf->queries[i].eva) {
+			event_asr_abort(spf->queries[i].eva);
+			spf->queries[i].eva = NULL;
+		}
+	}
+
+	spf->nqueries = 0;
+	spf->running = 0;
+	spf->state = state;
+	spf->state_reason = reason;
+	spf->done = 1;
+
+	osmtpd_filter_proceed(spf->ctx);
+}
+
+const char *
+spf_state2str(enum spf_state state)
+{
+	switch (state)
+	{
+	case SPF_NONE:
+		return "none";
+	case SPF_NEUTRAL:
+		return "neutral";
+	case SPF_PASS:
+		return "pass";
+	case SPF_FAIL:
+		return "fail";
+	case SPF_SOFTFAIL:
+		return "softfail";
+	case SPF_TEMPERROR:
+		return "temperror";
+	case SPF_PERMERROR:
+		return "permerror";
+	}
+}
+
+int
+spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linelen, ssize_t *aroff)
+{
+	if (spf == NULL) {
+		if ((*aroff =
+		    auth_ar_cat(line, linelen, *aroff,
+		    "; spf=none %s=none", type)
+		    ) == -1) {
+			return -1;
+		}
+		return 0;
+	}
+
+	if ((*aroff =
+	    auth_ar_cat(line, linelen, *aroff,
+	    "; spf=%s", spf_state2str(spf->state))
+	    ) == -1) {
+		return -1;
+	}
+
+	if ((*aroff =
+	    auth_ar_cat(line, linelen, *aroff,
+	    " %s=%s@%s",
+	    type,
+	    spf->sender_local,
+	    spf->sender_domain)
+	    ) == -1) {
+		return -1;
+	}
+
+	if (spf->state_reason != NULL) {
+		if ((*aroff =
+		    auth_ar_cat(line, linelen, *aroff,
+		    " reason=\"%s\"", spf->state_reason)
+		    ) == -1) {
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 void
 auth_message_verify(struct message *msg)
 {
-	struct session *ses = msg->ctx->local_session;
-	struct dkim_signature *sig;
 	size_t i;
-	ssize_t n, aroff = 0;
-	int found = 0;
-	char *line = NULL;
-	size_t linelen = 0;
 
-	if (!msg->readdone)
+	if (!msg->readdone || msg->nqueries > 0)
 		return;
 
 	for (i = 0; i < msg->nheaders; i++) {
@@ -1647,6 +2641,21 @@ auth_message_verify(struct message *msg)
 			continue;
 		dkim_signature_state(msg->header[i].sig, DKIM_PASS, NULL);
 	}
+
+	auth_ar_create(msg->ctx);
+}
+
+void
+auth_ar_create(struct osmtpd_ctx *ctx)
+{
+	struct dkim_signature *sig;
+	size_t i;
+	ssize_t n, aroff = 0;
+	int found = 0;
+	char *line = NULL;
+	size_t linelen = 0;
+	struct session *ses = ctx->local_session;
+	struct message *msg = ctx->local_message;
 
 	if ((aroff = auth_ar_cat(&line, &linelen, aroff,
 	    "Authentication-Results: %s", authservid)) == -1)
@@ -1699,13 +2708,25 @@ auth_message_verify(struct message *msg)
 	    "; iprev=%s", iprev_state2str(ses->iprev))) == -1)
 		osmtpd_err(1, "%s: malloc", __func__);
 
+	if (spf_ar_cat("smtp.helo", ses->spf_helo,
+	    &line, &linelen, &aroff) != 0)
+		osmtpd_err(1, "%s: malloc", __func__);
+
+	if (ses->spf_mailfrom != NULL) {
+		if (spf_ar_cat("smtp.mailfrom", ses->spf_mailfrom,
+		    &line, &linelen, &aroff) != 0)
+			osmtpd_err(1, "%s: malloc", __func__);
+	} else {
+		if (spf_ar_cat("smtp.mailfrom", ses->spf_helo,
+		    &line, &linelen, &aroff) != 0)
+			osmtpd_err(1, "%s: malloc", __func__);
+	}
+
 	if (aroff == -1)
 		osmtpd_err(1, "%s: malloc", __func__);
 
-	if (auth_ar_print(msg->ctx, line) != 0) {
-		osmtpd_warnx(msg->ctx, "Mallformed AR header");
-		goto fail;
-	}
+	if (auth_ar_print(msg->ctx, line) != 0)
+		osmtpd_warn(msg->ctx, "Invalid AR line: %s", line);
 
 	rewind(msg->origf);
 	while ((n = getline(&line, &linelen, msg->origf)) != -1) {
@@ -1714,7 +2735,6 @@ auth_message_verify(struct message *msg)
 	}
 	if (ferror(msg->origf))
 		osmtpd_err(1, "%s: ferror", __func__);
- fail:
 	free(line);
 	return;
 }
@@ -1765,6 +2785,10 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			    sizeof("iprev=") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_keyword(
 				    ncheckpoint + sizeof("iprev=") - 1, 0);
+			} else if (strncmp(ncheckpoint, "spf=",
+			    sizeof("spf=") - 1) == 0) {
+				ncheckpoint = osmtpd_ltok_skip_keyword(
+				    ncheckpoint + sizeof("spf=") - 1, 0);
 			/* reasonspec */
 			} else if (strncmp(ncheckpoint, "reason=",
 			    sizeof("reason=") - 1) == 0) {
