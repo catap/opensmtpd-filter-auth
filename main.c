@@ -136,6 +136,8 @@ struct spf_query {
 	struct spf_record *spf;
 	struct event_asr *eva;
 	enum spf_state q;
+	int include;
+	int exists;
 	char *domain;
 	char *txt;
 	int pos;
@@ -224,7 +226,8 @@ void dkim_body_parse(struct message *, const char *);
 void dkim_body_verify(struct dkim_signature *);
 void dkim_rr_resolve(struct asr_result *, void *);
 const char *iprev_state2str(enum iprev_state);
-void spf_lookup_record(struct spf_record *, const char *, int, enum spf_state);
+void spf_lookup_record(struct spf_record *, const char *, int,
+	enum spf_state, int, int);
 void spf_done(struct spf_record *, enum spf_state, const char *);
 void spf_resolve(struct asr_result *, void *);
 void spf_resolve_txt(struct dns_rr *, struct spf_query *);
@@ -312,7 +315,8 @@ void
 spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 {
 	struct session *ses = ctx->local_session;
-	spf_lookup_record(ses->spf_identity, identity, T_TXT, SPF_PASS);
+	spf_lookup_record(
+		ses->spf_identity, identity, T_TXT, SPF_PASS, 0, 0);
 }
 
 void
@@ -333,7 +337,8 @@ spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 		return;
 	}
 
-	spf_lookup_record(ses->spf_from, domain, T_TXT, SPF_PASS);
+	spf_lookup_record(
+		ses->spf_from, domain, T_TXT, SPF_PASS, 0, 0);
 }
 
 void
@@ -1797,7 +1802,8 @@ iprev_state2str(enum iprev_state state)
 }
 
 void
-spf_lookup_record(struct spf_record *spf, const char *domain, int type, enum spf_state qualifier)
+spf_lookup_record(struct spf_record *spf, const char *domain, int type,
+	enum spf_state qualifier, int include, int exists)
 {
 	struct asr_query *aq;
 	struct spf_query *query;
@@ -1814,6 +1820,8 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type, enum spf
 	query = &spf->queries[spf->nqueries++];
 	query->spf = spf;
 	query->q = qualifier;
+	query->include = include;
+	query->exists = exists;
 	query->txt = NULL;
 	query->eva = NULL;
 	spf->running++;
@@ -1825,13 +1833,11 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type, enum spf
 	}
 
 	if ((aq = res_query_async(query->domain, C_IN, type, NULL)) == NULL) {
-		spf_done(spf, SPF_NEUTRAL, NULL);
 		auth_err(spf->ctx, "res_query_async");
 		return;
 	}
 
 	if ((query->eva = event_asr_run(aq, spf_resolve, query)) == NULL) {
-		spf_done(spf, SPF_NEUTRAL, NULL);
 		auth_err(spf->ctx, "event_asr_run");
 		asr_abort(aq);
 		return;
@@ -1854,7 +1860,6 @@ spf_resolve(struct asr_result *ar, void *arg)
 	query->spf->running--;
 
 	if (ar->ar_h_errno == NETDB_INTERNAL) {
-		spf_done(spf, SPF_NEUTRAL, NULL);
 		auth_err(query->spf->ctx, "res_query_async");
 		return;
 	}
@@ -1868,7 +1873,9 @@ spf_resolve(struct asr_result *ar, void *arg)
 	if (ar->ar_h_errno == HOST_NOT_FOUND
 		|| ar->ar_h_errno == NO_DATA
 		|| ar->ar_h_errno == NO_ADDRESS) {
-		spf_done(query->spf, SPF_NONE, hstrerror(ar->ar_h_errno));
+		spf_done(query->spf,
+			query->include ? SPF_PERMERROR : SPF_NONE,
+			hstrerror(ar->ar_h_errno));
 		goto end;
 	}
 
@@ -1971,14 +1978,17 @@ spf_resolve_mx(struct dns_rr *rr, struct spf_query *query)
 	if (buf[strlen(buf) - 1] == '.')
 		buf[strlen(buf) - 1] = '\0';
 
-	spf_lookup_record(query->spf, buf, T_A, query->q);
-	spf_lookup_record(query->spf, buf, T_AAAA, query->q);
+	spf_lookup_record(query->spf, buf, T_A,
+		query->q, query->include, 0);
+	spf_lookup_record(query->spf, buf, T_AAAA,
+		query->q, query->include, 0);
 }
 
 void
 spf_resolve_a(struct dns_rr *rr, struct spf_query *query)
 {
-	if (spf_check_cidr(query->spf, &rr->rr.in_a.addr, 32) == 0) {
+	if (query->exists ||
+		spf_check_cidr(query->spf, &rr->rr.in_a.addr, 32) == 0) {
 		spf_done(query->spf, query->q, NULL);
 	}
 }
@@ -2121,6 +2131,9 @@ spf_execute_txt(struct spf_query *query)
 			ap++;
 		}
 
+		if (q != SPF_PASS && query->include)
+			continue;
+
 		if (strncasecmp("all", ap, 3) == 0) {
 			spf_done(query->spf, q, NULL);
 			return 0;
@@ -2146,33 +2159,41 @@ spf_execute_txt(struct spf_query *query)
 			continue;
 		}
 		if (strcasecmp("a", ap) == 0) {
-			spf_lookup_record(query->spf, query->domain, T_A, q);
-			spf_lookup_record(query->spf, query->domain, T_AAAA, q);
+			spf_lookup_record(query->spf, query->domain, T_A,
+				q, query->include, 0);
+			spf_lookup_record(query->spf, query->domain, T_AAAA,
+				q, query->include, 0);
 			break;
 		}
 		if (strncasecmp("a:", ap, 2) == 0) {
-			spf_lookup_record(query->spf, ap + 2, T_A, q);
-			spf_lookup_record(query->spf, ap + 2, T_AAAA, q);
+			spf_lookup_record(query->spf, ap + 2, T_A,
+				q, query->include, 0);
+			spf_lookup_record(query->spf, ap + 2, T_AAAA,
+				q, query->include, 0);
 			break;
 		}
 		if (strncasecmp("exists:", ap, 7) == 0) {
-			spf_lookup_record(query->spf, ap + 7, T_A, q);
+			spf_lookup_record(query->spf, ap + 7, T_A,
+				q, query->include, 1);
 			break;
 		}
 		if (strncasecmp("include:", ap, 8) == 0) {
-			spf_lookup_record(query->spf, ap + 8, T_TXT, q);
+			spf_lookup_record(query->spf, ap + 8, T_TXT, q, 1, 0);
 			break;
 		}
 		if (strncasecmp("redirect=", ap, 9) == 0) {
-			spf_lookup_record(query->spf, ap + 9, T_TXT, q);
+			spf_lookup_record(query->spf, ap + 9, T_TXT,
+				q, query->include, 0);
 			break;
 		}
 		if (strcasecmp("mx", ap) == 0) {
-			spf_lookup_record(query->spf, query->domain, T_MX, q);
+			spf_lookup_record(query->spf, query->domain, T_MX,
+				q, query->include, 0);
 			break;
 		}
 		if (strncasecmp("mx:", ap, 3) == 0) {
-			spf_lookup_record(query->spf, ap + 3, T_MX, q);
+			spf_lookup_record(query->spf, ap + 3, T_MX,
+				q, query->include, 0);
 			break;
 		}
 	}
