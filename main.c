@@ -325,8 +325,13 @@ spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 	if (domain != NULL)
 		domain++;
 
-	if ((ses->spf_from = spf_record_new(ctx)) == NULL)
-		osmtpd_err(1, NULL);
+	if (ses->spf_from)
+		spf_record_free(ses->spf_from);
+
+	if ((ses->spf_from = spf_record_new(ctx)) == NULL) {
+		auth_err(ctx, "malloc");
+		return;
+	}
 
 	spf_lookup_record(ses->spf_from, domain, T_TXT, SPF_PASS);
 }
@@ -442,8 +447,7 @@ auth_session_new(struct osmtpd_ctx *ctx)
 	if ((ses->spf_identity = spf_record_new(ctx)) == NULL)
 		osmtpd_err(1, NULL);
 
-	if ((ses->spf_from = spf_record_new(ctx)) == NULL)
-		osmtpd_err(1, NULL);
+	ses->spf_from = NULL;
 
 	return ses;
 }
@@ -454,7 +458,8 @@ auth_session_free(struct osmtpd_ctx *ctx, void *data)
 	struct session *ses = data;
 
 	spf_record_free(ses->spf_identity);
-	spf_record_free(ses->spf_from);
+	if (ses->spf_from)
+		spf_record_free(ses->spf_from);
 
 	free(ses);
 }
