@@ -97,6 +97,9 @@ struct signature {
 	int z;
 	struct event_asr *query;
 	EVP_PKEY *p;
+	/* RFC 6376 doesn't care about CNAME, use simalr with SPF limit */
+#define DKIM_LOOKUP_LOOKUP_LIMIT 11
+	int nqueries;
 };
 
 struct header {
@@ -143,6 +146,7 @@ void dkim_signature_parse_s(struct signature *, const char *, const char *);
 void dkim_signature_parse_t(struct signature *, const char *, const char *);
 void dkim_signature_parse_x(struct signature *, const char *, const char *);
 void dkim_signature_parse_z(struct signature *, const char *, const char *);
+void dkim_lookup_record(struct signature *sig, const char *domain);
 void dkim_signature_verify(struct signature *);
 void dkim_signature_header(EVP_MD_CTX *, struct signature *, struct header *);
 void dkim_signature_state(struct signature *, enum state, const char *);
@@ -359,7 +363,6 @@ void
 dkim_signature_parse(struct header *header)
 {
 	struct signature *sig;
-	struct asr_query *query;
 	const char *buf, *i, *end;
 	char tagname[3];
 	char subdomain[HOST_NAME_MAX + 1];
@@ -483,15 +486,21 @@ dkim_signature_parse(struct header *header)
 		return;
 	}
 
-	if ((query = res_query_async(subdomain, C_IN, T_TXT, NULL)) == NULL) {
-		osmtpd_warn(NULL, "res_query_async");
-		return;
-	}
-	if ((sig->query = event_asr_run(query, dkim_rr_resolve, sig)) == NULL) {
-		osmtpd_warn(NULL, "event_asr_run");
-		asr_abort(query);
-		return;
-	}
+	dkim_lookup_record(sig, subdomain);
+}
+
+void
+dkim_lookup_record(struct signature *sig, const char *domain)
+{
+	struct asr_query *query;
+
+	sig->nqueries++;
+
+	if ((query = res_query_async(domain, C_IN, T_TXT, NULL)) == NULL)
+		osmtpd_err(1, "res_query_async");
+
+	if ((sig->query = event_asr_run(query, dkim_rr_resolve, sig)) == NULL)
+		osmtpd_err(1, "res_query_async");
 }
 
 void
@@ -1097,6 +1106,7 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 	struct dns_header h;
 	struct dns_query q;
 	struct dns_rr rr;
+	char buf[HOST_NAME_MAX + 1];
 
 	sig->query = NULL;
 
@@ -1114,13 +1124,39 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 	unpack_init(&pack, ar->ar_data, ar->ar_datalen);
 	if (unpack_header(&pack, &h) != 0 ||
 	    unpack_query(&pack, &q) != 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid dns/txt");
+		osmtpd_warn(sig->header->msg->ctx,
+		    "Mallformed DKIM DNS response for domain %s: %s",
+		    print_dname(q.q_dname, buf, sizeof(buf)),
+		    pack.err);
+		dkim_signature_state(sig, DKIM_PERMERROR, pack.err);
 		goto verify;
 	}
+
 	for (; h.ancount > 0; h.ancount--) {
-		unpack_rr(&pack, &rr);
-		if (rr.rr_type != T_TXT)
+		if (unpack_rr(&pack, &rr) != 0) {
+			osmtpd_warn(sig->header->msg->ctx,
+			    "Mallformed DKIM DNS record for domain %s: %s",
+			    print_dname(q.q_dname, buf, sizeof(buf)),
+			    pack.err);
 			continue;
+		}
+
+		/* If we below limit, follow CNAME*/
+		if (rr.rr_type == T_CNAME &&
+		    sig->nqueries < DKIM_LOOKUP_LOOKUP_LIMIT ) {
+			print_dname(rr.rr.cname.cname, buf, sizeof(buf));
+			dkim_lookup_record(sig, buf);
+			free(ar->ar_data);
+			return;
+		}
+
+		if (rr.rr_type != T_TXT) {
+			osmtpd_warn(sig->header->msg->ctx,
+			    "Unexpected DKIM DNS record: %d for domain %s",
+			    rr.rr_type,
+			    print_dname(q.q_dname, buf, sizeof(buf)));
+			continue;
+		}
 
 		keylen = 0;
 		rr_txt = rr.rr.other.rdata;
