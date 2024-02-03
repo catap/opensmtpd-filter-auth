@@ -2180,9 +2180,11 @@ spf_execute_txt(struct spf_query *query)
 			break;
 		}
 		if (strncasecmp("redirect=", ap, 9) == 0) {
+			if (in != NULL)
+				continue;
 			spf_lookup_record(query->spf, ap + 9, T_TXT,
 				q, query->include, 0);
-			break;
+			return 0;
 		}
 		if (strcasecmp("mx", ap) == 0) {
 			spf_lookup_record(query->spf, query->domain, T_MX,
