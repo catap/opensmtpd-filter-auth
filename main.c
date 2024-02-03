@@ -1,5 +1,7 @@
 /*
+ * Copyright (c) 2024 Kirill A. Korinsky <kirill@korins.ky>
  * Copyright (c) 2022 Martijn van Duren <martijn@openbsd.org>
+ * Copyright (c) 2017 Gilles Chehade <gilles@poolp.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -32,6 +34,7 @@
 #include <opensmtpd.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -106,6 +109,48 @@ enum iprev_state {
 	IPREV_FAIL
 };
 
+/*
+ * Base on RFC7208
+ */
+enum spf_state {
+	SPF_NONE,
+	SPF_NEUTRAL,
+	SPF_PASS,
+	SPF_FAIL,
+	SPF_SOFTFAIL,
+	SPF_TEMPERROR,
+	SPF_PERMERROR
+};
+
+/*
+ * Avoid infinity or very long loop
+ */
+#define MAX_SPF_QUERIES 32
+
+/*
+ * RFC 5321 doesn't limit record size, enforce some resanable limit
+ */
+#define SPF_RECORD_MAX 4096
+
+struct spf_query {
+	struct spf_record *spf;
+	struct event_asr *eva;
+	enum spf_state q;
+	char *domain;
+	char *txt;
+	int pos;
+};
+
+struct spf_record {
+	struct osmtpd_ctx *ctx;
+	enum spf_state state;
+	const char *state_reason;
+	int nqueries;
+	int running;
+	int done;
+	struct spf_query *queries;
+};
+
 struct header {
 	struct message *msg;
 	uint8_t readdone;
@@ -133,6 +178,9 @@ struct message {
 struct session {
 	struct osmtpd_ctx *ctx;
 	enum iprev_state iprev;
+	struct spf_record *spf_from;
+	struct spf_record *spf_identity;
+	struct sockaddr_storage src;
 };
 
 void usage(void);
@@ -140,8 +188,12 @@ void auth_err(struct osmtpd_ctx *, char *);
 void auth_errx(struct osmtpd_ctx *, char *);
 void auth_conf(const char *, const char *);
 void auth_connect(struct osmtpd_ctx *, const char *, enum osmtpd_status, struct sockaddr_storage *, struct sockaddr_storage *);
+void spf_identity(struct osmtpd_ctx *, const char *);
+void spf_mailfrom(struct osmtpd_ctx *, const char *);
 void auth_dataline(struct osmtpd_ctx *, const char *);
 void auth_commit(struct osmtpd_ctx *);
+void *spf_record_new(struct osmtpd_ctx *);
+void spf_record_free(struct spf_record *);
 void *auth_session_new(struct osmtpd_ctx *);
 void auth_session_free(struct osmtpd_ctx *, void *);
 void *auth_message_new(struct osmtpd_ctx *);
@@ -171,6 +223,19 @@ void dkim_body_parse(struct message *, const char *);
 void dkim_body_verify(struct dkim_signature *);
 void dkim_rr_resolve(struct asr_result *, void *);
 const char *iprev_state2str(enum iprev_state);
+void spf_lookup_record(struct spf_record *, const char *, int, enum spf_state);
+void spf_done(struct spf_record *, enum spf_state, const char *);
+void spf_resolve(struct asr_result *, void *);
+void spf_resolve_txt(struct dns_rr *, struct spf_query *);
+void spf_resolve_mx(struct dns_rr *, struct spf_query *);
+void spf_resolve_a(struct dns_rr *, struct spf_query *);
+void spf_resolve_aaaa(struct dns_rr *, struct spf_query *);
+char* spf_parse_txt(const char *, size_t);
+int spf_check_cidr(struct spf_record *, struct in_addr *, int );
+int spf_check_cidr6(struct spf_record *, struct in6_addr *, int );
+int spf_execute_txt(struct spf_query *);
+const char *spf_state2str(enum spf_state);
+int spf_ar_cat(const char *, struct spf_record *, char **, size_t *, ssize_t *);
 void auth_message_verify(struct message *);
 ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
     __attribute__((__format__ (printf, 4, 5)));
@@ -194,11 +259,14 @@ main(int argc, char *argv[])
 	if ((ectx = EVP_ENCODE_CTX_new()) == NULL)
 		osmtpd_err(1, "EVP_ENCODE_CTX_new");
 
-	osmtpd_need(OSMTPD_NEED_FCRDNS);
+	osmtpd_need(OSMTPD_NEED_SRC|OSMTPD_NEED_FCRDNS|OSMTPD_NEED_IDENTITY|OSMTPD_NEED_GREETING);
 	osmtpd_register_conf(auth_conf);
 	osmtpd_register_filter_dataline(auth_dataline);
 	osmtpd_register_filter_commit(auth_commit);
 	osmtpd_register_report_connect(1, auth_connect);
+	osmtpd_register_filter_helo(spf_identity);
+	osmtpd_register_filter_ehlo(spf_identity);
+	osmtpd_register_filter_mailfrom(spf_mailfrom);
 	osmtpd_local_session(auth_session_new, auth_session_free);
 	osmtpd_local_message(auth_message_new, auth_message_free);
 	osmtpd_run();
@@ -235,6 +303,31 @@ auth_connect(struct osmtpd_ctx *ctx, const char *rdns, enum osmtpd_status fcrdns
 		ses->iprev = IPREV_PASS;
 	else
 		ses->iprev = IPREV_FAIL;
+
+	memcpy(&ses->src, src, sizeof(struct sockaddr_storage));
+}
+
+void
+spf_identity(struct osmtpd_ctx *ctx, const char *identity)
+{
+	struct session *ses = ctx->local_session;
+	spf_lookup_record(ses->spf_identity, identity, T_TXT, SPF_PASS);
+}
+
+void
+spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
+{
+	char *domain;
+	struct session *ses = ctx->local_session;
+
+	domain = strchr(from, '@');
+	if (domain != NULL)
+		domain++;
+
+	if ((ses->spf_from = spf_record_new(ctx)) == NULL)
+		osmtpd_err(1, NULL);
+
+	spf_lookup_record(ses->spf_from, domain, T_TXT, SPF_PASS);
 }
 
 void
@@ -298,6 +391,43 @@ auth_commit(struct osmtpd_ctx *ctx)
 }
 
 void *
+spf_record_new(struct osmtpd_ctx *ctx)
+{
+	struct spf_record *spf;
+
+	if ((spf = malloc(sizeof(*spf))) == NULL)
+		osmtpd_err(1, NULL);
+
+	spf->ctx = ctx;
+	spf->state = SPF_NONE;
+	spf->state_reason = NULL;
+	spf->nqueries = 0;
+	spf->running = 0;
+	spf->done = 0;
+	if ((spf->queries = calloc(MAX_SPF_QUERIES,
+							   sizeof(*(spf->queries)))) == NULL)
+		osmtpd_err(1, NULL);
+
+	return spf;
+}
+
+void
+spf_record_free(struct spf_record *spf)
+{
+	int i;
+
+	for (i = 0; i < MAX_SPF_QUERIES; i++) {
+		if(spf->queries[i].domain)
+			free(spf->queries[i].domain);
+		if(spf->queries[i].txt)
+			free(spf->queries[i].txt);
+	}
+
+	free(spf->queries);
+	free(spf);
+}
+
+void *
 auth_session_new(struct osmtpd_ctx *ctx)
 {
 	struct session *ses;
@@ -308,6 +438,12 @@ auth_session_new(struct osmtpd_ctx *ctx)
 	ses->ctx = ctx;
 	ses->iprev = IPREV_NONE;
 
+	if ((ses->spf_identity = spf_record_new(ctx)) == NULL)
+		osmtpd_err(1, NULL);
+
+	if ((ses->spf_from = spf_record_new(ctx)) == NULL)
+		osmtpd_err(1, NULL);
+
 	return ses;
 }
 
@@ -315,6 +451,9 @@ void
 auth_session_free(struct osmtpd_ctx *ctx, void *data)
 {
 	struct session *ses = data;
+
+	spf_record_free(ses->spf_identity);
+	spf_record_free(ses->spf_from);
 
 	free(ses);
 }
@@ -1638,6 +1777,452 @@ iprev_state2str(enum iprev_state state)
 }
 
 void
+spf_lookup_record(struct spf_record *spf, const char *domain, int type, enum spf_state qualifier)
+{
+	struct asr_query *aq;
+	struct spf_query *query;
+
+	if (spf->nqueries >= MAX_SPF_QUERIES) {
+		spf_done(spf, SPF_PERMERROR, "To many DNS queries");
+		return;
+	}
+
+	if (domain == NULL) {
+		domain = "";
+	}
+
+	query = &spf->queries[spf->nqueries++];
+	query->spf = spf;
+	query->q = qualifier;
+	query->txt = NULL;
+	query->eva = NULL;
+	spf->running++;
+
+	if ((query->domain = strdup(domain)) == NULL) {
+		spf_done(spf, SPF_NEUTRAL, NULL);
+		auth_err(spf->ctx, "malloc");
+		return;
+	}
+
+	if ((aq = res_query_async(query->domain, C_IN, type, NULL)) == NULL) {
+		spf_done(spf, SPF_NEUTRAL, NULL);
+		auth_err(spf->ctx, "res_query_async");
+		return;
+	}
+
+	if ((query->eva = event_asr_run(aq, spf_resolve, query)) == NULL) {
+		spf_done(spf, SPF_NEUTRAL, NULL);
+		auth_err(spf->ctx, "event_asr_run");
+		asr_abort(aq);
+		return;
+	}
+}
+
+void
+spf_resolve(struct asr_result *ar, void *arg)
+{
+	int i;
+
+	struct spf_query *query = arg;
+	struct spf_record *spf = query->spf;
+	struct unpack pack;
+	struct dns_header h;
+	struct dns_query q;
+	struct dns_rr rr;
+
+	query->eva = NULL;
+	query->spf->running--;
+
+	if (ar->ar_h_errno == NETDB_INTERNAL) {
+		spf_done(spf, SPF_NEUTRAL, NULL);
+		auth_err(query->spf->ctx, "res_query_async");
+		return;
+	}
+
+	if (ar->ar_h_errno == TRY_AGAIN
+		|| ar->ar_h_errno == NO_RECOVERY) {
+		spf_done(query->spf, SPF_TEMPERROR, hstrerror(ar->ar_h_errno));
+		goto end;
+	}
+
+	if (ar->ar_h_errno == HOST_NOT_FOUND
+		|| ar->ar_h_errno == NO_DATA
+		|| ar->ar_h_errno == NO_ADDRESS) {
+		spf_done(query->spf, SPF_NONE, hstrerror(ar->ar_h_errno));
+		goto end;
+	}
+
+	unpack_init(&pack, ar->ar_data, ar->ar_datalen);
+	if (unpack_header(&pack, &h) != 0 ||
+	    unpack_query(&pack, &q) != 0) {
+		spf_done(query->spf, SPF_TEMPERROR, hstrerror(ar->ar_h_errno));
+		goto end;
+	}
+
+	for (; h.ancount; h.ancount--) {
+		if (unpack_rr(&pack, &rr) != 0)
+			continue;
+
+		switch (rr.rr_type)
+		{
+		case T_TXT:
+			spf_resolve_txt(&rr, query);
+			break;
+
+		case T_MX:
+			spf_resolve_mx(&rr, query);
+			break;
+
+		case T_A:
+			spf_resolve_a(&rr, query);
+			break;
+
+		case T_AAAA:
+			spf_resolve_aaaa(&rr, query);
+			break;
+
+		default:
+			spf_done(query->spf, SPF_TEMPERROR, "Unexpected response type");
+			break;
+		}
+
+		if (spf->done)
+			goto end;
+	}
+
+	if (spf->running > 0)
+		return;
+
+	for (i = spf->nqueries - 1; i >= 0; i--) {
+		if (spf->queries[i].txt != NULL) {
+			if (spf_execute_txt(&spf->queries[i]) == 0)
+				break;
+		}
+	}
+
+end:
+	if (spf->running == 0)
+		osmtpd_filter_proceed(spf->ctx);
+}
+
+void
+spf_resolve_txt(struct dns_rr *rr, struct spf_query *query)
+{
+	char *txt;
+	txt = spf_parse_txt(rr->rr.other.rdata, rr->rr.other.rdlen);
+	if (txt == NULL) {
+		auth_err(query->spf->ctx, "spf_parse_txt");
+		return;
+	}
+
+	if (strncasecmp("v=spf1 ", txt, 7)) {
+		free(txt);
+		return;
+	}
+
+	if (query->txt != NULL) {
+		free(txt);
+		spf_done(query->spf, SPF_PERMERROR, "Duplicated SPF record");
+		return;
+	}
+
+	query->txt = txt;
+	query->pos = 0;
+	spf_execute_txt(query);
+}
+
+void
+spf_resolve_mx(struct dns_rr *rr, struct spf_query *query)
+{
+	char buf[HOST_NAME_MAX + 1];
+
+	print_dname(rr->rr.mx.exchange, buf, sizeof(buf));
+	buf[strlen(buf) - 1] = '\0';
+	if (buf[strlen(buf) - 1] == '.')
+		buf[strlen(buf) - 1] = '\0';
+
+	spf_lookup_record(query->spf, buf, T_A, query->q);
+	spf_lookup_record(query->spf, buf, T_AAAA, query->q);
+}
+
+void
+spf_resolve_a(struct dns_rr *rr, struct spf_query *query)
+{
+	if (spf_check_cidr(query->spf, &rr->rr.in_a.addr, 32) == 0) {
+		spf_done(query->spf, query->q, NULL);
+	}
+}
+
+void
+spf_resolve_aaaa(struct dns_rr *rr, struct spf_query *query)
+{
+	if (spf_check_cidr6(query->spf, &rr->rr.in_aaaa.addr6, 128) == 0) {
+		spf_done(query->spf, query->q, NULL);
+	}
+}
+
+char *
+spf_parse_txt(const char *rdata, size_t rdatalen)
+{
+	size_t len, dstsz = SPF_RECORD_MAX - 1;
+	ssize_t r = 0;
+	char *dst, *odst;
+
+	if (rdatalen >= dstsz) {
+		errno = EOVERFLOW;
+		return NULL;
+	}
+
+	odst = dst = malloc(dstsz);
+	if (dst == NULL)
+		return NULL;
+
+	while (rdatalen) {
+		len = *(const unsigned char *)rdata;
+		if (len >= rdatalen) {
+			errno = EINVAL;
+			return NULL;
+		}
+
+		rdata++;
+		rdatalen--;
+
+		if (len == 0)
+			continue;
+
+		if (len >= dstsz) {
+			errno = EOVERFLOW;
+			return NULL;
+		}
+		memmove(dst, rdata, len);
+		dst += len;
+		dstsz -= len;
+
+		rdata += len;
+		rdatalen -= len;
+		r += len;
+	}
+
+	odst[r] = '\0';
+
+	return odst;
+}
+
+int
+spf_check_cidr(struct spf_record *spf, struct in_addr *net, int bits)
+{
+	struct in_addr *addr;
+	struct session *ses = spf->ctx->local_session;
+
+	if (ses->src.ss_family != AF_INET)
+		return -1;
+
+	if (bits == 0)
+		return 0;
+
+	addr = &(((struct sockaddr_in *)(&ses->src))->sin_addr);
+
+	return ((addr->s_addr ^ net->s_addr) & htonl(0xFFFFFFFFu << (32 - bits)));
+}
+
+int
+spf_check_cidr6(struct spf_record *spf, struct in6_addr *net, int bits)
+{
+	int rc;
+	uint32_t *a, *n, whole, incomplete;
+	struct in6_addr *addr;
+	struct session *ses = spf->ctx->local_session;
+
+	if (ses->src.ss_family != AF_INET6)
+		return -1;
+
+	if (bits == 0)
+		return 0;
+
+	addr = &(((struct sockaddr_in6 *)(&ses->src))->sin6_addr);
+
+	a = addr->__u6_addr.__u6_addr32;
+	n = net->__u6_addr.__u6_addr32;
+
+	whole = bits >> 5;
+	incomplete = bits & 0x1f;
+	if (whole) {
+		rc = memcmp(a, n, whole << 2);
+		if (rc)
+			return rc;
+	}
+	if (incomplete)
+		return (a[whole] ^ n[whole]) & htonl((0xffffffffu) << (32 - incomplete));
+
+	return 0;
+}
+
+int
+spf_execute_txt(struct spf_query *query)
+{
+	struct in_addr ina;
+	struct in6_addr in6a;
+	char *ap = NULL;
+	char *in = query->txt + query->pos;
+	char *end;
+	int bits;
+
+	enum spf_state q = query->q;
+
+	while ((ap = strsep(&in, " ")) != NULL) {
+		if (strcasecmp(ap, "v=spf1") == 0)
+			continue;
+
+		end = ap + strlen(ap)-1;
+		if (*end == '.')
+			*end = '\0';
+
+		if (*ap == '+') {
+			q = SPF_PASS;
+			ap++;
+		} else if (*ap == '-') {
+			q = SPF_FAIL;
+			ap++;
+		} else if (*ap == '~') {
+			q = SPF_SOFTFAIL;
+			ap++;
+		} else if (*ap == '?') {
+			q = SPF_NEUTRAL;
+			ap++;
+		}
+
+		if (strncasecmp("all", ap, 3) == 0) {
+			spf_done(query->spf, q, NULL);
+			return 0;
+		}
+		if (strncasecmp("ip4:", ap, 4) == 0) {
+			if ((bits = inet_net_pton(AF_INET, ap + 4, &ina, sizeof(ina))) == -1)
+				continue;
+
+			if (spf_check_cidr(query->spf, &ina, bits) == 0) {
+				spf_done(query->spf, q, NULL);
+				return 0;
+			}
+			continue;
+		}
+		if (strncasecmp("ip6:", ap, 4) == 0) {
+			if ((bits = inet_net_pton(AF_INET6, ap + 4, &ina, sizeof(ina))) == -1)
+				continue;
+
+			if (spf_check_cidr6(query->spf, &in6a, bits) == 0) {
+				spf_done(query->spf, q, NULL);
+				return 0;
+			}
+			continue;
+		}
+		if (strcasecmp("a", ap) == 0) {
+			spf_lookup_record(query->spf, query->domain, T_A, q);
+			spf_lookup_record(query->spf, query->domain, T_AAAA, q);
+			break;
+		}
+		if (strncasecmp("a:", ap, 2) == 0) {
+			spf_lookup_record(query->spf, ap + 2, T_A, q);
+			spf_lookup_record(query->spf, ap + 2, T_AAAA, q);
+			break;
+		}
+		if (strncasecmp("exists:", ap, 7) == 0) {
+			spf_lookup_record(query->spf, ap + 7, T_A, q);
+			break;
+		}
+		if (strncasecmp("include:", ap, 8) == 0) {
+			spf_lookup_record(query->spf, ap + 8, T_TXT, q);
+			break;
+		}
+		if (strncasecmp("redirect=", ap, 9) == 0) {
+			spf_lookup_record(query->spf, ap + 9, T_TXT, q);
+			break;
+		}
+		if (strcasecmp("mx", ap) == 0) {
+			spf_lookup_record(query->spf, query->domain, T_MX, q);
+			break;
+		}
+		if (strncasecmp("mx:", ap, 3) == 0) {
+			spf_lookup_record(query->spf, ap + 3, T_MX, q);
+			break;
+		}
+	}
+
+	if (in == NULL)
+		return 0;
+
+	query->pos = in - query->txt;
+
+	return query->pos;
+}
+
+void
+spf_done(struct spf_record *spf, enum spf_state state, const char *reason)
+{
+	int i;
+
+	if (spf->done)
+		return;
+
+	for (i = 0; i < spf->nqueries; i++) {
+		if (spf->queries[i].eva) {
+			event_asr_abort(spf->queries[i].eva);
+			spf->queries[i].eva = NULL;
+		}
+	}
+
+	spf->nqueries = 0;
+	spf->running = 0;
+	spf->state = state;
+	spf->state_reason = reason;
+	spf->done = 1;
+}
+
+const char *
+spf_state2str(enum spf_state state)
+{
+	switch (state)
+	{
+	case SPF_NONE:
+		return "none";
+	case SPF_NEUTRAL:
+		return "neutral";
+	case SPF_PASS:
+		return "pass";
+	case SPF_FAIL:
+		return "fail";
+	case SPF_SOFTFAIL:
+		return "softfail";
+	case SPF_TEMPERROR:
+		return "temperror";
+	case SPF_PERMERROR:
+		return "permerror";
+	}
+}
+
+int
+spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linelen, ssize_t *aroff)
+{
+	if (spf == NULL)
+		return 0;
+
+	if ((*aroff = auth_ar_cat(line, linelen, *aroff,
+							  "; spf=%s smtp=%s",
+							  spf_state2str(spf->state), type)) == -1) {
+		return -1;
+	}
+	if (spf->state_reason != NULL)
+	{
+		if ((*aroff = auth_ar_cat(line, linelen, *aroff,
+								 " reason=\"%s\"",
+								  spf->state_reason)) == -1) {
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+void
 auth_message_verify(struct message *msg)
 {
 	struct session *ses = msg->ctx->local_session;
@@ -1723,6 +2308,16 @@ auth_message_verify(struct message *msg)
 		goto fail;
 	}
 
+	if (spf_ar_cat("helo", ses->spf_identity, &line, &linelen, &aroff) != 0) {
+		auth_err(msg->ctx, "malloc");
+		goto fail;
+	}
+
+	if (spf_ar_cat("mailfrom", ses->spf_from, &line, &linelen, &aroff) != 0) {
+		auth_err(msg->ctx, "malloc");
+		goto fail;
+	}
+
 	if (aroff == -1) {
 		auth_err(msg->ctx, "malloc");
 		goto fail;
@@ -1782,12 +2377,20 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			    sizeof("iprev") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_keyword(
 				    ncheckpoint + sizeof("iprev"), 0);
+			} else if (strncmp(ncheckpoint, "spf",
+			    sizeof("spf") - 1) == 0) {
+				ncheckpoint = osmtpd_ltok_skip_keyword(
+				    ncheckpoint + sizeof("spf"), 0);
 			/* reasonspec */
 			} else if (strncmp(ncheckpoint, "reason",
 			    sizeof("reason") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_value(
 				    ncheckpoint + sizeof("reason"), 0);
 			/* propspec */
+			} else if (strncmp(ncheckpoint, "smtp",
+			    sizeof("smtp") - 1) == 0) {
+				ncheckpoint = osmtpd_ltok_skip_value(
+				    ncheckpoint + sizeof("smtp"), 0);
 			} else {
 				ncheckpoint += sizeof("header.x=") - 1;
 				ncheckpoint = osmtpd_ltok_skip_ar_pvalue(
