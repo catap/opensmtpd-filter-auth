@@ -184,6 +184,7 @@ struct session {
 };
 
 void usage(void);
+void auth_warn(struct osmtpd_ctx *, const char*, ...);
 void auth_err(struct osmtpd_ctx *, char *);
 void auth_errx(struct osmtpd_ctx *, char *);
 void auth_conf(const char *, const char *);
@@ -1354,13 +1355,27 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 	unpack_init(&pack, ar->ar_data, ar->ar_datalen);
 	if (unpack_header(&pack, &h) != 0 ||
 	    unpack_query(&pack, &q) != 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid dns/txt");
+		auth_warn(sig->header->msg->ctx,
+				  "Mallformed DKIM DNS response for domain %s: %s",
+				  q.q_dname, pack.err);
+		dkim_signature_state(sig, DKIM_PERMERROR, pack.err);
 		goto verify;
 	}
+
 	for (; h.ancount > 0; h.ancount--) {
-		unpack_rr(&pack, &rr);
-		if (rr.rr_type != T_TXT)
+		if (unpack_rr(&pack, &rr) != 0) {
+			auth_warn(sig->header->msg->ctx,
+					  "Mallformed DKIM DNS record for domain %s: %s",
+					  q.q_dname, pack.err);
 			continue;
+		}
+
+		if (rr.rr_type != T_TXT) {
+			auth_warn(sig->header->msg->ctx,
+					  "Unexpected DKIM DNS record: %d for domain %s",
+					  rr.rr_type, q.q_dname);
+			continue;
+		}
 
 		keylen = 0;
 		rr_txt = rr.rr.other.rdata;
@@ -1855,13 +1870,20 @@ spf_resolve(struct asr_result *ar, void *arg)
 	unpack_init(&pack, ar->ar_data, ar->ar_datalen);
 	if (unpack_header(&pack, &h) != 0 ||
 	    unpack_query(&pack, &q) != 0) {
-		spf_done(query->spf, SPF_TEMPERROR, hstrerror(ar->ar_h_errno));
+		auth_warn(query->spf->ctx,
+				  "Mallformed SPF DNS response for domain %s: %s",
+				  q.q_dname, pack.err);
+		spf_done(query->spf, SPF_TEMPERROR, pack.err);
 		goto end;
 	}
 
 	for (; h.ancount; h.ancount--) {
-		if (unpack_rr(&pack, &rr) != 0)
+		if (unpack_rr(&pack, &rr) != 0) {
+			auth_warn(query->spf->ctx,
+					  "Mallformed SPF DNS record for domain %s: %s",
+					  q.q_dname, pack.err);
 			continue;
+		}
 
 		switch (rr.rr_type)
 		{
@@ -1882,7 +1904,10 @@ spf_resolve(struct asr_result *ar, void *arg)
 			break;
 
 		default:
-			spf_done(query->spf, SPF_TEMPERROR, "Unexpected response type");
+			auth_warn(spf->ctx,
+					  "Unexpected SPF DNS record: %d for domain %s",
+					  rr.rr_type, q.q_dname);
+			spf_done(query->spf, SPF_TEMPERROR, "Unexpected record");
 			break;
 		}
 
@@ -2454,6 +2479,18 @@ auth_errx(struct osmtpd_ctx *ctx, char *text)
 		msg->err = 1;
 	else
 		osmtpd_filter_disconnect(ctx, "Internal server error");
+}
+
+void
+auth_warn(struct osmtpd_ctx *ctx, const char* format, ...)
+{
+    va_list args;
+	fprintf(stderr, "%016"PRIx64" ", ctx->reqid);
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fprintf(stderr, "\n" );
+	fflush(stderr);
 }
 
 __dead void
