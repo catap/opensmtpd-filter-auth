@@ -123,11 +123,6 @@ enum spf_state {
 };
 
 /*
- * Avoid infinity or very long loop
- */
-#define MAX_SPF_QUERIES 32
-
-/*
  * RFC 5321 doesn't limit record size, enforce some resanable limit
  */
 #define SPF_RECORD_MAX 4096
@@ -150,7 +145,8 @@ struct spf_record {
 	int nqueries;
 	int running;
 	int done;
-	struct spf_query *queries;
+#define SPF_DNS_LOOKUP_LIMIT 10
+	struct spf_query queries[SPF_DNS_LOOKUP_LIMIT];
 };
 
 struct header {
@@ -404,6 +400,7 @@ auth_commit(struct osmtpd_ctx *ctx)
 void *
 spf_record_new(struct osmtpd_ctx *ctx)
 {
+	int i;
 	struct spf_record *spf;
 
 	if ((spf = malloc(sizeof(*spf))) == NULL)
@@ -415,9 +412,11 @@ spf_record_new(struct osmtpd_ctx *ctx)
 	spf->nqueries = 0;
 	spf->running = 0;
 	spf->done = 0;
-	if ((spf->queries = calloc(MAX_SPF_QUERIES,
-							   sizeof(*(spf->queries)))) == NULL)
-		osmtpd_err(1, NULL);
+
+	for (i = 0; i < SPF_DNS_LOOKUP_LIMIT; i++) {
+		spf->queries[i].domain = NULL;
+		spf->queries[i].txt = NULL;
+	}
 
 	return spf;
 }
@@ -427,14 +426,13 @@ spf_record_free(struct spf_record *spf)
 {
 	int i;
 
-	for (i = 0; i < MAX_SPF_QUERIES; i++) {
+	for (i = 0; i < SPF_DNS_LOOKUP_LIMIT; i++) {
 		if(spf->queries[i].domain)
 			free(spf->queries[i].domain);
 		if(spf->queries[i].txt)
 			free(spf->queries[i].txt);
 	}
 
-	free(spf->queries);
 	free(spf);
 }
 
@@ -1808,7 +1806,7 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type,
 	struct asr_query *aq;
 	struct spf_query *query;
 
-	if (spf->nqueries >= MAX_SPF_QUERIES) {
+	if (spf->nqueries >= SPF_DNS_LOOKUP_LIMIT) {
 		spf_done(spf, SPF_PERMERROR, "To many DNS queries");
 		return;
 	}
