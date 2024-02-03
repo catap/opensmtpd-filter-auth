@@ -1946,7 +1946,7 @@ spf_resolve(struct asr_result *ar, void *arg)
 
 	for (i = spf->nqueries - 1; i >= 0; i--) {
 		if (spf->queries[i].txt != NULL) {
-			if (spf_execute_txt(&spf->queries[i]) == 0)
+			if (spf_execute_txt(&spf->queries[i]) != 0)
 				break;
 		}
 	}
