@@ -145,6 +145,7 @@ struct spf_record {
 	int nqueries;
 	int running;
 	int done;
+	char *identity;
 #define SPF_DNS_LOOKUP_LIMIT 10
 	struct spf_query queries[SPF_DNS_LOOKUP_LIMIT];
 };
@@ -176,8 +177,8 @@ struct message {
 struct session {
 	struct osmtpd_ctx *ctx;
 	enum iprev_state iprev;
-	struct spf_record *spf_from;
-	struct spf_record *spf_identity;
+	struct spf_record *spf_helo;
+	struct spf_record *spf_mailfrom;
 	struct sockaddr_storage src;
 };
 
@@ -311,8 +312,14 @@ void
 spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 {
 	struct session *ses = ctx->local_session;
+
+	if ((ses->spf_helo->identity = strdup(identity)) == NULL) {
+		auth_err(ctx, "strdup");
+		return;
+	}
+
 	spf_lookup_record(
-		ses->spf_identity, identity, T_TXT, SPF_PASS, 0, 0);
+		ses->spf_helo, identity, T_TXT, SPF_PASS, 0, 0);
 }
 
 void
@@ -325,16 +332,21 @@ spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 	if (domain != NULL)
 		domain++;
 
-	if (ses->spf_from)
-		spf_record_free(ses->spf_from);
+	if (ses->spf_mailfrom)
+		spf_record_free(ses->spf_mailfrom);
 
-	if ((ses->spf_from = spf_record_new(ctx)) == NULL) {
+	if ((ses->spf_mailfrom = spf_record_new(ctx)) == NULL) {
 		auth_err(ctx, "malloc");
 		return;
 	}
 
+	if ((ses->spf_mailfrom->identity = strdup(from)) == NULL) {
+		auth_err(ctx, "strdup");
+		return;
+	}
+
 	spf_lookup_record(
-		ses->spf_from, domain, T_TXT, SPF_PASS, 0, 0);
+		ses->spf_mailfrom, domain, T_TXT, SPF_PASS, 0, 0);
 }
 
 void
@@ -412,6 +424,7 @@ spf_record_new(struct osmtpd_ctx *ctx)
 	spf->nqueries = 0;
 	spf->running = 0;
 	spf->done = 0;
+	spf->identity = NULL;
 
 	for (i = 0; i < SPF_DNS_LOOKUP_LIMIT; i++) {
 		spf->queries[i].domain = NULL;
@@ -433,6 +446,9 @@ spf_record_free(struct spf_record *spf)
 			free(spf->queries[i].txt);
 	}
 
+	if (spf->identity)
+		free(spf->identity);
+
 	free(spf);
 }
 
@@ -447,10 +463,10 @@ auth_session_new(struct osmtpd_ctx *ctx)
 	ses->ctx = ctx;
 	ses->iprev = IPREV_NONE;
 
-	if ((ses->spf_identity = spf_record_new(ctx)) == NULL)
+	if ((ses->spf_helo = spf_record_new(ctx)) == NULL)
 		osmtpd_err(1, NULL);
 
-	ses->spf_from = NULL;
+	ses->spf_mailfrom = NULL;
 
 	return ses;
 }
@@ -460,9 +476,9 @@ auth_session_free(struct osmtpd_ctx *ctx, void *data)
 {
 	struct session *ses = data;
 
-	spf_record_free(ses->spf_identity);
-	if (ses->spf_from)
-		spf_record_free(ses->spf_from);
+	spf_record_free(ses->spf_helo);
+	if (ses->spf_mailfrom)
+		spf_record_free(ses->spf_mailfrom);
 
 	free(ses);
 }
@@ -2256,16 +2272,19 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 	if (spf == NULL)
 		return 0;
 
-	if ((*aroff = auth_ar_cat(line, linelen, *aroff,
-							  "; spf=%s smtp=%s",
-							  spf_state2str(spf->state), type)) == -1) {
+	if ((*aroff =
+			auth_ar_cat(line, linelen, *aroff,
+				"; spf=%s smtp.%s=%s",
+				spf_state2str(spf->state), type, spf->identity)
+			) == -1) {
 		return -1;
 	}
 	if (spf->state_reason != NULL)
 	{
-		if ((*aroff = auth_ar_cat(line, linelen, *aroff,
-								 " reason=\"%s\"",
-								  spf->state_reason)) == -1) {
+		if ((*aroff =
+				auth_ar_cat(line, linelen, *aroff,
+					" reason=\"%s\"", spf->state_reason)
+				) == -1) {
 			return -1;
 		}
 	}
@@ -2359,12 +2378,14 @@ auth_message_verify(struct message *msg)
 		goto fail;
 	}
 
-	if (spf_ar_cat("helo", ses->spf_identity, &line, &linelen, &aroff) != 0) {
+	if (spf_ar_cat("helo", ses->spf_helo,
+			&line, &linelen, &aroff) != 0) {
 		auth_err(msg->ctx, "malloc");
 		goto fail;
 	}
 
-	if (spf_ar_cat("mailfrom", ses->spf_from, &line, &linelen, &aroff) != 0) {
+	if (spf_ar_cat("mailfrom", ses->spf_mailfrom,
+			&line, &linelen, &aroff) != 0) {
 		auth_err(msg->ctx, "malloc");
 		goto fail;
 	}
@@ -2437,11 +2458,12 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			    sizeof("reason") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_value(
 				    ncheckpoint + sizeof("reason"), 0);
-			/* propspec */
+			/* smtpspec */
 			} else if (strncmp(ncheckpoint, "smtp",
 			    sizeof("smtp") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_value(
 				    ncheckpoint + sizeof("smtp"), 0);
+			/* propspec */
 			} else {
 				ncheckpoint += sizeof("header.x=") - 1;
 				ncheckpoint = osmtpd_ltok_skip_ar_pvalue(
