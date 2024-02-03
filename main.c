@@ -1831,7 +1831,7 @@ auth_err(struct osmtpd_ctx *ctx, char *text)
 	struct message *msg = ctx->local_message;
 
 	fprintf(stderr, "%016"PRIx64" %s: %s\n",
-			msg->ctx->reqid, text, strerror(errno));
+			ctx->reqid, text, strerror(errno));
 
 	if (msg != NULL)
 		msg->err = 1;
@@ -1845,7 +1845,7 @@ auth_errx(struct osmtpd_ctx *ctx, char *text)
 	struct message *msg = ctx->local_message;
 
 	fprintf(stderr, "%016"PRIx64" %s\n",
-			msg->ctx->reqid, text);
+			ctx->reqid, text);
 
 	if (msg != NULL)
 		msg->err = 1;
