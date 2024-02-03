@@ -1,0 +1,2 @@
+This filter won't be possible without http://imperialat.at/dev/filter-dkimverify/
+and I also used spfwalk.c from OpenSMTPD.
