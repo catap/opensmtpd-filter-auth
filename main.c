@@ -2466,10 +2466,16 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 				ncheckpoint = osmtpd_ltok_skip_value(
 				    ncheckpoint + sizeof("reason"), 0);
 			/* smtpspec */
-			} else if (strncmp(ncheckpoint, "smtp.",
-			    sizeof("smtp.") - 1) == 0) {
-				ncheckpoint = osmtpd_ltok_skip_value(
-				    ncheckpoint + sizeof("smtp."), 0);
+			} else if (strncmp(ncheckpoint, "smtp.helo=",
+			    sizeof("smtp.helo=") - 1) == 0) {
+				ncheckpoint += sizeof("smtp.helo=") - 1;
+				ncheckpoint = osmtpd_ltok_skip_domain(
+					ncheckpoint, 0);
+			} else if (strncmp(ncheckpoint, "smtp.mailfrom=",
+			    sizeof("smtp.mailfrom=") - 1) == 0) {
+				ncheckpoint += sizeof("smtp.mailfrom=") - 1;
+				ncheckpoint = osmtpd_ltok_skip_addr_spec(
+					ncheckpoint, 0);
 			/* propspec */
 			} else {
 				ncheckpoint += sizeof("header.x=") - 1;
