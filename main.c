@@ -1887,9 +1887,8 @@ spf_resolve(struct asr_result *ar, void *arg)
 	if (ar->ar_h_errno == HOST_NOT_FOUND
 		|| ar->ar_h_errno == NO_DATA
 		|| ar->ar_h_errno == NO_ADDRESS) {
-		spf_done(query->spf,
-			query->include ? SPF_PERMERROR : SPF_NONE,
-			hstrerror(ar->ar_h_errno));
+		if (query->include)
+			spf_done(query->spf, SPF_PERMERROR, hstrerror(ar->ar_h_errno));
 		goto end;
 	}
 
