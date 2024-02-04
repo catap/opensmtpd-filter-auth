@@ -2273,10 +2273,18 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 
 	if ((*aroff =
 			auth_ar_cat(line, linelen, *aroff,
-				"; spf=%s smtp.%s=%s",
-				spf_state2str(spf->state), type, spf->identity)
+				"; spf=%s", spf_state2str(spf->state))
 			) == -1) {
 		return -1;
+	}
+	if (spf->identity != NULL) {
+		if ((*aroff =
+				auth_ar_cat(line, linelen, *aroff,
+					" smtp.%s=%s",
+					type, spf->identity)
+				) == -1) {
+			return -1;
+		}
 	}
 	if (spf->state_reason != NULL)
 	{
@@ -2458,10 +2466,10 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 				ncheckpoint = osmtpd_ltok_skip_value(
 				    ncheckpoint + sizeof("reason"), 0);
 			/* smtpspec */
-			} else if (strncmp(ncheckpoint, "smtp",
-			    sizeof("smtp") - 1) == 0) {
+			} else if (strncmp(ncheckpoint, "smtp.",
+			    sizeof("smtp.") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_value(
-				    ncheckpoint + sizeof("smtp"), 0);
+				    ncheckpoint + sizeof("smtp."), 0);
 			/* propspec */
 			} else {
 				ncheckpoint += sizeof("header.x=") - 1;
