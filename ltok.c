@@ -1862,15 +1862,88 @@ osmtpd_ltok_skip_x_key_t_tag_flag(const char *ptr, int optional)
 const char *
 osmtpd_ltok_skip_ar_pvalue(const char *ptr, int optional)
 {
-	const char *start = ptr, *tmp;
+	const char *start = ptr, *value, *addr, *local;
+
+	ptr = osmtpd_ltok_skip_cfws(start, 1);
+
+	value = osmtpd_ltok_skip_value(ptr, 1);
+	addr = osmtpd_ltok_skip_addr_spec(ptr, 1);
+	local = osmtpd_ltok_skip_local_part(ptr, 1);
+
+	if (value > ptr)
+		ptr = value;
+
+	if (addr > ptr)
+		ptr = addr;
+
+	if (local > ptr)
+		ptr = local;
+
+	if (ptr == NULL)
+		return optional ? start : NULL;
+
+	return ptr;
+}
+
+const char *
+osmtpd_ltok_skip_ar_propspec(const char *ptr, int optional)
+{
+	const char *start = ptr;
+
+	if (strncmp(ptr, "smtp", sizeof("smtp") - 1) == 0)
+		ptr += sizeof("smtp") - 1;
+	else if (strncmp(ptr, "header", sizeof("header") - 1) == 0)
+		ptr += sizeof("header") - 1;
+	else if (strncmp(ptr, "body", sizeof("body") - 1) == 0)
+		ptr += sizeof("body") - 1;
+	else if (strncmp(ptr, "policy", sizeof("policy") - 1) == 0)
+		ptr += sizeof("policy") - 1;
+	else
+		return optional ? start : NULL;
 
 	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
-	if ((tmp = osmtpd_ltok_skip_value(ptr, 0)) != NULL)
-		return tmp;
-	ptr = osmtpd_ltok_skip_local_part(ptr, 1);
-	if (ptr[0] == '@')
-		ptr++;
-	if ((ptr = osmtpd_ltok_skip_domain(ptr, 0)) == NULL)
+
+	if (*ptr != '.')
 		return optional ? start : NULL;
+	ptr++;
+
+	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
+
+	if ((ptr = osmtpd_ltok_skip_keyword(ptr, 0)) == NULL)
+		return optional ? start : NULL;
+
+	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
+
+	if (*ptr != '=')
+		return optional ? start : NULL;
+	ptr++;
+
+	if ((ptr = osmtpd_ltok_skip_ar_pvalue(ptr, 0)) == NULL)
+		return optional ? start : NULL;
+
+	return ptr;
+}
+
+const char *
+osmtpd_ltok_skip_ar_reasonspec(const char *ptr, int optional)
+{
+	const char *start = ptr;
+
+	if (strncmp(ptr, "reason", sizeof("reason") - 1) != 0)
+		return optional ? start : NULL;
+
+	ptr += sizeof("reason") - 1;
+
+	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
+
+	if (*ptr != '=')
+		return optional ? start : NULL;
+	ptr++;
+
+	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
+
+	if ((ptr = osmtpd_ltok_skip_value(ptr, 0)) == NULL)
+		return optional ? start : NULL;
+
 	return ptr;
 }
