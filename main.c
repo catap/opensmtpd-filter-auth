@@ -430,6 +430,10 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from,
 		spf->queries[i].txt = NULL;
 	}
 
+	from = osmtpd_ltok_skip_display_name(from, 1);
+	if (*from == '<')
+		from++;
+
 	at = strchr(from, '@');
 	if (at == NULL)
 		goto fail;
@@ -437,7 +441,9 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from,
 	if ((spf->sender_local = strndup(from, at - from)) == NULL)
 		goto fail;
 
-	if ((spf->sender_domain = strdup(at + 1)) == NULL)
+	at++;
+
+	if ((spf->sender_domain = strndup(at, strchr(at, '>') - at)) == NULL)
 		goto fail;
 
 	spf_lookup_record(
@@ -2326,7 +2332,7 @@ void
 auth_message_verify(struct message *msg)
 {
 	size_t i;
-	char *from = NULL;
+	const char *from = NULL;
 
 	if (!msg->readdone)
 		return;
@@ -2349,16 +2355,6 @@ auth_message_verify(struct message *msg)
 		return;
 	}
 
-	from = osmtpd_ltok_skip_display_name(from, 1);
-	if (*from == '<')
-		from++;
-
-	if ((from = strndup(from, strchr(from, '>') - from)) == NULL) {
-		auth_err(msg->ctx, "strndup");
-		auth_ar_create(msg->ctx);
-		return;
-	}
-
 	if (msg->spf_from)
 		spf_record_free(msg->spf_from);
 
@@ -2367,8 +2363,6 @@ auth_message_verify(struct message *msg)
 		auth_err(msg->ctx, "malloc");
 		auth_ar_create(msg->ctx);
 	}
-
-	free(from);
 }
 
 void
