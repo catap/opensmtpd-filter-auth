@@ -1684,6 +1684,7 @@ dkim_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			start = osmtpd_ltok_skip_cfws(checkpoint, 1);
 			if (*start == '\0')
 				return;
+			ncheckpoint = start;
 			scan = start;
 			arlen = 8;
 			first = 0;
@@ -1704,16 +1705,19 @@ dkim_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			/* reasonspec */
 			} else if (strncmp(ncheckpoint, "reason",
 			    sizeof("reason") - 1) == 0) {
-				ncheckpoint = osmtpd_ltok_skip_value(
-				    ncheckpoint + sizeof("reason"), 0);
+				ncheckpoint = osmtpd_ltok_skip_ar_reasonspec(
+				    ncheckpoint, 0);
 			/* propspec */
 			} else {
-				ncheckpoint += sizeof("header.x=") - 1;
-				ncheckpoint = osmtpd_ltok_skip_ar_pvalue(
+				ncheckpoint = osmtpd_ltok_skip_ar_propspec(
 				    ncheckpoint, 0);
-				if (ncheckpoint[0] == ';')
-					ncheckpoint++;
 			}
+
+			if (ncheckpoint == NULL)
+				osmtpd_errx(1, "Invalid AR line: |%s", scan);
+
+			if (*ncheckpoint == ';')
+				ncheckpoint++;
 		}
 	}
 	osmtpd_filter_dataline(ctx, "%s%s", first ? "" : "\t", start);

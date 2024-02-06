@@ -167,6 +167,8 @@ const char *osmtpd_ltok_skip_key_t_tag_flag(const char *, int);
 const char *osmtpd_ltok_skip_x_key_t_tag_flag(const char *, int);
 
 /* Authentication-Results */
+const char *osmtpd_ltok_skip_ar_propspec(const char *, int);
+const char *osmtpd_ltok_skip_ar_reasonspec(const char *, int);
 const char *osmtpd_ltok_skip_ar_pvalue(const char *, int);
 
 const char *osmtpd_ltok_domain_uncomment(const char *);
