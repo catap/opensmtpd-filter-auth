@@ -1860,17 +1860,52 @@ osmtpd_ltok_skip_x_key_t_tag_flag(const char *ptr, int optional)
 }
 
 const char *
-osmtpd_ltok_skip_ar_pvalue(const char *ptr, int optional)
+osmtpd_ltok_skip_ar_propspec(const char *ptr, int optional)
 {
-	const char *start = ptr, *tmp;
+	const char *start = ptr, *value;
+
+	if (strncmp(ptr, "smtp", sizeof("smtp") - 1) == 0)
+		ptr += sizeof("smtp") - 1;
+	else if (strncmp(ptr, "header", sizeof("header") - 1) == 0)
+		ptr += sizeof("header") - 1;
+	else if (strncmp(ptr, "body", sizeof("body") - 1) == 0)
+		ptr += sizeof("body") - 1;
+	else if (strncmp(ptr, "policy", sizeof("policy") - 1) == 0)
+		ptr += sizeof("policy") - 1;
+	else
+		return optional ? start : NULL;
 
 	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
-	if ((tmp = osmtpd_ltok_skip_value(ptr, 0)) != NULL)
-		return tmp;
-	ptr = osmtpd_ltok_skip_local_part(ptr, 1);
-	if (ptr[0] == '@')
-		ptr++;
-	if ((ptr = osmtpd_ltok_skip_domain(ptr, 0)) == NULL)
+
+	if (*ptr != '.')
 		return optional ? start : NULL;
-	return ptr;
+	ptr++;
+
+	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
+
+	if ((ptr = osmtpd_ltok_skip_keyword(ptr, 0)) == NULL)
+		return optional ? start : NULL;
+
+	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
+
+	if (*ptr != '=')
+		return optional ? start : NULL;
+	ptr++;
+
+	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
+
+	value = osmtpd_ltok_skip_value(ptr, 0);
+
+	ptr = osmtpd_ltok_skip_local_part(ptr, 1);
+	if (*ptr == '@')
+		ptr++;
+	ptr = osmtpd_ltok_skip_domain(ptr, 0);
+
+	if (value > ptr)
+		ptr = value;
+
+	if (ptr != NULL)
+		return ptr;
+
+	return optional ? start : NULL;
 }

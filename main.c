@@ -139,13 +139,15 @@ struct spf_query {
 };
 
 struct spf_record {
+	void (*cb)(struct osmtpd_ctx *);
 	struct osmtpd_ctx *ctx;
 	enum spf_state state;
 	const char *state_reason;
+	char *sender_local;
+	char *sender_domain;
 	int nqueries;
 	int running;
 	int done;
-	char *identity;
 #define SPF_DNS_LOOKUP_LIMIT 10
 	struct spf_query queries[SPF_DNS_LOOKUP_LIMIT];
 };
@@ -172,6 +174,7 @@ struct message {
 	size_t nheaders;
 	int err;
 	int readdone;
+	struct spf_record *spf_from;
 };
 
 struct session {
@@ -192,7 +195,8 @@ void spf_identity(struct osmtpd_ctx *, const char *);
 void spf_mailfrom(struct osmtpd_ctx *, const char *);
 void auth_dataline(struct osmtpd_ctx *, const char *);
 void auth_commit(struct osmtpd_ctx *);
-void *spf_record_new(struct osmtpd_ctx *);
+void *spf_record_new(struct osmtpd_ctx *, const char *,
+	void (*)(struct osmtpd_ctx *));
 void spf_record_free(struct spf_record *);
 void *auth_session_new(struct osmtpd_ctx *);
 void auth_session_free(struct osmtpd_ctx *, void *);
@@ -238,6 +242,7 @@ int spf_execute_txt(struct spf_query *);
 const char *spf_state2str(enum spf_state);
 int spf_ar_cat(const char *, struct spf_record *, char **, size_t *, ssize_t *);
 void auth_message_verify(struct message *);
+void auth_ar_create(struct osmtpd_ctx *);
 ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
     __attribute__((__format__ (printf, 4, 5)));
 void auth_ar_print(struct osmtpd_ctx *, const char *);
@@ -311,42 +316,34 @@ auth_connect(struct osmtpd_ctx *ctx, const char *rdns, enum osmtpd_status fcrdns
 void
 spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 {
+	char from[HOST_NAME_MAX + 12];
+
 	struct session *ses = ctx->local_session;
 
-	if ((ses->spf_helo->identity = strdup(identity)) == NULL) {
-		auth_err(ctx, "strdup");
+	snprintf(from, sizeof(from), "postmaster@%s", identity);
+
+	if ((ses->spf_helo =
+			spf_record_new(ctx, from, osmtpd_filter_proceed))
+			== NULL) {
+		auth_err(ctx, "malloc");
 		return;
 	}
-
-	spf_lookup_record(
-		ses->spf_helo, identity, T_TXT, SPF_PASS, 0, 0);
 }
 
 void
 spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 {
-	char *domain;
 	struct session *ses = ctx->local_session;
-
-	domain = strchr(from, '@');
-	if (domain != NULL)
-		domain++;
 
 	if (ses->spf_mailfrom)
 		spf_record_free(ses->spf_mailfrom);
 
-	if ((ses->spf_mailfrom = spf_record_new(ctx)) == NULL) {
+	if ((ses->spf_mailfrom =
+			spf_record_new(ctx, from, osmtpd_filter_proceed))
+			== NULL) {
 		auth_err(ctx, "malloc");
 		return;
 	}
-
-	if ((ses->spf_mailfrom->identity = strdup(from)) == NULL) {
-		auth_err(ctx, "strdup");
-		return;
-	}
-
-	spf_lookup_record(
-		ses->spf_mailfrom, domain, T_TXT, SPF_PASS, 0, 0);
 }
 
 void
@@ -410,28 +407,47 @@ auth_commit(struct osmtpd_ctx *ctx)
 }
 
 void *
-spf_record_new(struct osmtpd_ctx *ctx)
+spf_record_new(struct osmtpd_ctx *ctx, const char *from,
+	void (*cb)(struct osmtpd_ctx *))
 {
 	int i;
+	char *at;
 	struct spf_record *spf;
 
 	if ((spf = malloc(sizeof(*spf))) == NULL)
 		osmtpd_err(1, NULL);
 
+	spf->cb = cb;
 	spf->ctx = ctx;
 	spf->state = SPF_NONE;
 	spf->state_reason = NULL;
 	spf->nqueries = 0;
 	spf->running = 0;
 	spf->done = 0;
-	spf->identity = NULL;
 
 	for (i = 0; i < SPF_DNS_LOOKUP_LIMIT; i++) {
 		spf->queries[i].domain = NULL;
 		spf->queries[i].txt = NULL;
 	}
 
+	at = strchr(from, '@');
+	if (at == NULL)
+		goto fail;
+
+	if ((spf->sender_local = strndup(from, at - from)) == NULL)
+		goto fail;
+
+	if ((spf->sender_domain = strdup(at + 1)) == NULL)
+		goto fail;
+
+	spf_lookup_record(
+		spf, spf->sender_domain, T_TXT, SPF_PASS, 0, 0);
+
 	return spf;
+
+fail:
+	free(spf);
+	return NULL;
 }
 
 void
@@ -446,8 +462,8 @@ spf_record_free(struct spf_record *spf)
 			free(spf->queries[i].txt);
 	}
 
-	if (spf->identity)
-		free(spf->identity);
+	free(spf->sender_local);
+	free(spf->sender_domain);
 
 	free(spf);
 }
@@ -463,9 +479,7 @@ auth_session_new(struct osmtpd_ctx *ctx)
 	ses->ctx = ctx;
 	ses->iprev = IPREV_NONE;
 
-	if ((ses->spf_helo = spf_record_new(ctx)) == NULL)
-		osmtpd_err(1, NULL);
-
+	ses->spf_helo = NULL;
 	ses->spf_mailfrom = NULL;
 
 	return ses;
@@ -476,7 +490,8 @@ auth_session_free(struct osmtpd_ctx *ctx, void *data)
 {
 	struct session *ses = data;
 
-	spf_record_free(ses->spf_helo);
+	if (ses->spf_helo)
+		spf_record_free(ses->spf_helo);
 	if (ses->spf_mailfrom)
 		spf_record_free(ses->spf_mailfrom);
 
@@ -503,6 +518,7 @@ auth_message_new(struct osmtpd_ctx *ctx)
 	msg->nheaders = 0;
 	msg->err = 0;
 	msg->readdone = 0;
+	msg->spf_from = NULL;
 
 	return msg;
 }
@@ -528,6 +544,10 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 		free(msg->header[i].sig);
 	}
 	free(msg->header);
+
+	if (msg->spf_from)
+		spf_record_free(msg->spf_from);
+
 	free(msg);
 }
 
@@ -1952,7 +1972,7 @@ spf_resolve(struct asr_result *ar, void *arg)
 
 end:
 	if (spf->running == 0)
-		osmtpd_filter_proceed(spf->ctx);
+		spf->cb(spf->ctx);
 }
 
 void
@@ -2277,15 +2297,6 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 			) == -1) {
 		return -1;
 	}
-	if (spf->identity != NULL) {
-		if ((*aroff =
-				auth_ar_cat(line, linelen, *aroff,
-					" smtp.%s=%s",
-					type, spf->identity)
-				) == -1) {
-			return -1;
-		}
-	}
 	if (spf->state_reason != NULL)
 	{
 		if ((*aroff =
@@ -2295,6 +2306,15 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 			return -1;
 		}
 	}
+	if ((*aroff =
+			auth_ar_cat(line, linelen, *aroff,
+				" %s=%s@%s",
+				type,
+				spf->sender_local,
+				spf->sender_domain)
+			) == -1) {
+		return -1;
+	}
 
 	return 0;
 }
@@ -2302,18 +2322,16 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 void
 auth_message_verify(struct message *msg)
 {
-	struct session *ses = msg->ctx->local_session;
-	struct dkim_signature *sig;
 	size_t i;
-	ssize_t n, aroff = 0;
-	int found = 0;
-	char *line = NULL;
-	size_t linelen = 0;
+	char *from = NULL;
 
 	if (!msg->readdone)
 		return;
 
 	for (i = 0; i < msg->nheaders; i++) {
+		if (strncasecmp(msg->header[i].buf, "From:",
+				sizeof("From:") - 1) == 0)
+			from = msg->header[i].buf + sizeof("From:") - 1;
 		if (msg->header[i].sig == NULL)
 			continue;
 		if (msg->header[i].sig->query != NULL)
@@ -2322,7 +2340,46 @@ auth_message_verify(struct message *msg)
 			continue;
 		dkim_signature_state(msg->header[i].sig, DKIM_PASS, NULL);
 	}
-	
+
+	if (from == NULL) {
+		auth_ar_create(msg->ctx);
+		return;
+	}
+
+	from = osmtpd_ltok_skip_display_name(from, 1);
+	if (*from == '<')
+		from++;
+
+	if ((from = strndup(from, strchr(from, '>') - from)) == NULL) {
+		auth_err(msg->ctx, "strndup");
+		auth_ar_create(msg->ctx);
+		return;
+	}
+
+	if (msg->spf_from)
+		spf_record_free(msg->spf_from);
+
+	if ((msg->spf_from = spf_record_new(msg->ctx, from, auth_ar_create))
+			== NULL) {
+		auth_err(msg->ctx, "malloc");
+		auth_ar_create(msg->ctx);
+	}
+
+	free(from);
+}
+
+void
+auth_ar_create(struct osmtpd_ctx *ctx)
+{
+	struct dkim_signature *sig;
+	size_t i;
+	ssize_t n, aroff = 0;
+	int found = 0;
+	char *line = NULL;
+	size_t linelen = 0;
+	struct session *ses = ctx->local_session;
+	struct message *msg = ctx->local_message;
+
 	if ((aroff = auth_ar_cat(&line, &linelen, aroff,
 	    "Authentication-Results: %s", authservid)) == -1) {
 		auth_err(msg->ctx, "malloc");
@@ -2385,13 +2442,19 @@ auth_message_verify(struct message *msg)
 		goto fail;
 	}
 
-	if (spf_ar_cat("helo", ses->spf_helo,
+	if (spf_ar_cat("smtp.helo", ses->spf_helo,
 			&line, &linelen, &aroff) != 0) {
 		auth_err(msg->ctx, "malloc");
 		goto fail;
 	}
 
-	if (spf_ar_cat("mailfrom", ses->spf_mailfrom,
+	if (spf_ar_cat("smtp.mailfrom", ses->spf_mailfrom,
+			&line, &linelen, &aroff) != 0) {
+		auth_err(msg->ctx, "malloc");
+		goto fail;
+	}
+
+	if (spf_ar_cat("header.from", msg->spf_from,
 			&line, &linelen, &aroff) != 0) {
 		auth_err(msg->ctx, "malloc");
 		goto fail;
@@ -2440,6 +2503,7 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			start = osmtpd_ltok_skip_cfws(checkpoint, 1);
 			if (*start == '\0')
 				return;
+			ncheckpoint = start;
 			scan = start;
 			arlen = 8;
 			first = 0;
@@ -2470,25 +2534,17 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			    sizeof("reason") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_value(
 				    ncheckpoint + sizeof("reason"), 0);
-			/* smtpspec */
-			} else if (strncmp(ncheckpoint, "smtp.helo=",
-			    sizeof("smtp.helo=") - 1) == 0) {
-				ncheckpoint += sizeof("smtp.helo=") - 1;
-				ncheckpoint = osmtpd_ltok_skip_domain(
-					ncheckpoint, 0);
-			} else if (strncmp(ncheckpoint, "smtp.mailfrom=",
-			    sizeof("smtp.mailfrom=") - 1) == 0) {
-				ncheckpoint += sizeof("smtp.mailfrom=") - 1;
-				ncheckpoint = osmtpd_ltok_skip_addr_spec(
-					ncheckpoint, 0);
 			/* propspec */
 			} else {
-				ncheckpoint += sizeof("header.x=") - 1;
-				ncheckpoint = osmtpd_ltok_skip_ar_pvalue(
-				    ncheckpoint, 0);
-				if (ncheckpoint[0] == ';')
-					ncheckpoint++;
+				ncheckpoint = osmtpd_ltok_skip_ar_propspec(
+						ncheckpoint, 0);
 			}
+
+			if (ncheckpoint == NULL)
+				osmtpd_errx(1, "Invalid AR line: |%s", scan);
+
+			if (*ncheckpoint == ';')
+				ncheckpoint++;
 		}
 	}
 	osmtpd_filter_dataline(ctx, "%s%s", first ? "" : "\t", start);
