@@ -1664,8 +1664,7 @@ void
 dkim_ar_print(struct osmtpd_ctx *ctx, const char *start)
 {
 	const char *scan, *checkpoint, *ncheckpoint;
-	size_t arlen = 0;
-	int first = 1, arid = 1;
+	int arlen = 0, first = 1, arid = 1;
 
 	checkpoint = start;
 	ncheckpoint = osmtpd_ltok_skip_hdr_name(start, 0) + 1;
@@ -1675,10 +1674,16 @@ dkim_ar_print(struct osmtpd_ctx *ctx, const char *start)
 		else
 			arlen++;
 		if (arlen >= AUTHENTICATION_RESULTS_LINELEN) {
+			arlen = (int)(checkpoint - start);
+			if (arlen <= 0) {
+				arlen = (int)(ncheckpoint - start);
+				checkpoint = ncheckpoint;
+			}
 			osmtpd_filter_dataline(ctx, "%s%.*s", first ? "" : "\t",
-			    (int)((checkpoint == start ?
-			    ncheckpoint : checkpoint) - start), start);
+			    arlen, start);
 			start = osmtpd_ltok_skip_cfws(checkpoint, 1);
+			if (*start == '\0')
+				return;
 			scan = start;
 			arlen = 8;
 			first = 0;
