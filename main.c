@@ -1857,14 +1857,13 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type,
 		domain = "";
 	}
 
-	query = &spf->queries[spf->nqueries++];
+	query = &spf->queries[spf->nqueries];
 	query->spf = spf;
 	query->q = qualifier;
 	query->include = include;
 	query->exists = exists;
 	query->txt = NULL;
 	query->eva = NULL;
-	spf->running++;
 
 	if ((query->domain = strdup(domain)) == NULL) {
 		spf_done(spf, SPF_NEUTRAL, NULL);
@@ -1882,6 +1881,9 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type,
 		asr_abort(aq);
 		return;
 	}
+
+	spf->running++;
+	spf->nqueries++;
 }
 
 void
