@@ -1918,11 +1918,10 @@ spf_resolve(struct asr_result *ar, void *arg)
 	if (ar->ar_h_errno == HOST_NOT_FOUND
 		|| ar->ar_h_errno == NO_DATA
 		|| ar->ar_h_errno == NO_ADDRESS) {
-		if (query->exists)
-			goto consume;
-		if (query->include)
-			spf_done(query->spf, SPF_PERMERROR, hstrerror(ar->ar_h_errno));
-		goto end;
+		if (query->include && !query->exists)
+			spf_done(query->spf,
+				SPF_PERMERROR, hstrerror(ar->ar_h_errno));
+		goto consume;
 	}
 
 	unpack_init(&pack, ar->ar_data, ar->ar_datalen);
