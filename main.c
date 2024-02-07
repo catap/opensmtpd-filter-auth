@@ -430,10 +430,13 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from,
 		spf->queries[i].txt = NULL;
 	}
 
-	from = osmtpd_ltok_skip_display_name(from, 1);
-	if (*from == '<')
-		from++;
+	if (strchr(from, '<') != NULL) {
+		from = osmtpd_ltok_skip_display_name(from, 1);
+		if (*from == '<')
+			from++;
+	}
 
+	from = osmtpd_ltok_skip_cfws(from, 1);
 	at = strchr(from, '@');
 	if (at == NULL)
 		goto fail;
