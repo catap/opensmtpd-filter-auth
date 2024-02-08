@@ -2612,12 +2612,14 @@ void
 auth_warn(struct osmtpd_ctx *ctx, const char* format, ...)
 {
     va_list args;
+
 	fprintf(stderr, "%016"PRIx64" ", ctx->reqid);
-    va_start(args, format);
+
+	va_start(args, format);
     vfprintf(stderr, format, args);
     va_end(args);
-    fprintf(stderr, "\n" );
-	fflush(stderr);
+
+    fprintf(stderr, "\n");
 }
 
 __dead void
