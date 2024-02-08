@@ -245,7 +245,7 @@ void auth_message_verify(struct message *);
 void auth_ar_create(struct osmtpd_ctx *);
 ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
     __attribute__((__format__ (printf, 4, 5)));
-void auth_ar_print(struct osmtpd_ctx *, const char *);
+int auth_ar_print(struct osmtpd_ctx *, const char *);
 int dkim_key_text_parse(struct dkim_signature *, const char *);
 
 char *authservid;
@@ -2466,7 +2466,10 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 		goto fail;
 	}
 
-	auth_ar_print(msg->ctx, line);
+	if (auth_ar_print(msg->ctx, line) != 0) {
+		auth_warn(msg->ctx, "Invalid AR line: %s", line);
+		goto fail;
+	}
 
 	rewind(msg->origf);
 	while ((n = getline(&line, &linelen, msg->origf)) != -1) {
@@ -2480,7 +2483,7 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 	return;
 }
 
-void
+int
 auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 {
 	const char *scan, *checkpoint, *ncheckpoint;
@@ -2503,7 +2506,7 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			    arlen, start);
 			start = osmtpd_ltok_skip_cfws(checkpoint, 1);
 			if (*start == '\0')
-				return;
+				return 0;
 			ncheckpoint = start;
 			scan = start;
 			arlen = 8;
@@ -2542,13 +2545,14 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			}
 
 			if (ncheckpoint == NULL)
-				osmtpd_errx(1, "Invalid AR line: |%s", scan);
+				return -1;
 
 			if (*ncheckpoint == ';')
 				ncheckpoint++;
 		}
 	}
 	osmtpd_filter_dataline(ctx, "%s%s", first ? "" : "\t", start);
+	return 0;
 }
 
 ssize_t
