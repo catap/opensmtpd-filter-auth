@@ -155,7 +155,7 @@ void dkim_rr_resolve(struct asr_result *, void *);
 void dkim_message_verify(struct message *);
 ssize_t dkim_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
     __attribute__((__format__ (printf, 4, 5)));
-void dkim_ar_print(struct osmtpd_ctx *, const char *);
+int dkim_ar_print(struct osmtpd_ctx *, const char *);
 int dkim_key_text_parse(struct signature *, const char *);
 
 char *authservid;
@@ -1646,7 +1646,10 @@ dkim_message_verify(struct message *msg)
 			goto fail;
 		}
 	}
-	dkim_ar_print(msg->ctx, line);
+	if (dkim_ar_print(msg->ctx, line) != 0) {
+		dkim_err(msg, "Mallformed AR header");
+		goto fail;
+	}
 
 	rewind(msg->origf);
 	while ((n = getline(&line, &linelen, msg->origf)) != -1) {
@@ -1660,7 +1663,7 @@ dkim_message_verify(struct message *msg)
 	return;
 }
 
-void
+int
 dkim_ar_print(struct osmtpd_ctx *ctx, const char *start)
 {
 	const char *scan, *checkpoint, *ncheckpoint;
@@ -1683,7 +1686,7 @@ dkim_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			    arlen, start);
 			start = osmtpd_ltok_skip_cfws(checkpoint, 1);
 			if (*start == '\0')
-				return;
+				return 0;
 			ncheckpoint = start;
 			scan = start;
 			arlen = 8;
@@ -1714,13 +1717,14 @@ dkim_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			}
 
 			if (ncheckpoint == NULL)
-				osmtpd_errx(1, "Invalid AR line: |%s", scan);
+				return -1;
 
 			if (*ncheckpoint == ';')
 				ncheckpoint++;
 		}
 	}
 	osmtpd_filter_dataline(ctx, "%s%s", first ? "" : "\t", start);
+	return 0;
 }
 
 ssize_t
