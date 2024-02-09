@@ -325,7 +325,7 @@ spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 	if ((ses->spf_helo =
 			spf_record_new(ctx, from, osmtpd_filter_proceed))
 			== NULL) {
-		auth_err(ctx, "malloc");
+		auth_errx(ctx, "spf_record_new");
 		return;
 	}
 }
@@ -341,7 +341,7 @@ spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 	if ((ses->spf_mailfrom =
 			spf_record_new(ctx, from, osmtpd_filter_proceed))
 			== NULL) {
-		auth_err(ctx, "malloc");
+		auth_errx(ctx, "spf_record_new");
 		return;
 	}
 }
@@ -411,7 +411,7 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from,
 	void (*cb)(struct osmtpd_ctx *))
 {
 	int i;
-	char *at;
+	const char *at;
 	struct spf_record *spf;
 
 	if ((spf = malloc(sizeof(*spf))) == NULL)
@@ -430,29 +430,42 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from,
 		spf->queries[i].txt = NULL;
 	}
 
-	if (strchr(from, '<') != NULL) {
+	from = osmtpd_ltok_skip_cfws(from, 1);
+
+	if (strchr(from, '<') != NULL)
 		from = osmtpd_ltok_skip_display_name(from, 1);
-		if (*from == '<')
-			from++;
+
+	if (*from == '<')
+		from++;
+
+	if ((at = osmtpd_ltok_skip_local_part(from, 0)) == NULL)
+		goto fail;
+
+	if ((spf->sender_local = strndup(from, at - from)) == NULL) {
+		auth_err(ctx, "malloc");
+		goto fail;
 	}
 
-	from = osmtpd_ltok_skip_cfws(from, 1);
-	at = strchr(from, '@');
-	if (at == NULL)
-		goto fail;
-
-	if ((spf->sender_local = strndup(from, at - from)) == NULL)
-		goto fail;
-
+	if (*at != '@')
+		goto fail_local;
 	at++;
 
-	if ((spf->sender_domain = strndup(at, strchr(at, '>') - at)) == NULL)
-		goto fail;
+	if ((from = osmtpd_ltok_skip_domain(at, 0)) == NULL)
+		goto fail_local;
+
+
+	if ((spf->sender_domain = strndup(at, from - at)) == NULL) {
+		auth_err(ctx, "malloc");
+		goto fail_local;
+	}
 
 	spf_lookup_record(
 		spf, spf->sender_domain, T_TXT, SPF_PASS, 0, 0);
 
 	return spf;
+
+fail_local:
+	free(spf->sender_local);
 
 fail:
 	free(spf);
@@ -2364,7 +2377,6 @@ auth_message_verify(struct message *msg)
 
 	if ((msg->spf_from = spf_record_new(msg->ctx, from, auth_ar_create))
 			== NULL) {
-		auth_err(msg->ctx, "malloc");
 		auth_ar_create(msg->ctx);
 	}
 }
@@ -2466,10 +2478,8 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 		goto fail;
 	}
 
-	if (auth_ar_print(msg->ctx, line) != 0) {
+	if (auth_ar_print(msg->ctx, line) != 0)
 		auth_warn(msg->ctx, "Invalid AR line: %s", line);
-		goto fail;
-	}
 
 	rewind(msg->origf);
 	while ((n = getline(&line, &linelen, msg->origf)) != -1) {
