@@ -325,7 +325,7 @@ spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 	if ((ses->spf_helo =
 			spf_record_new(ctx, from, osmtpd_filter_proceed))
 			== NULL) {
-		auth_errx(ctx, "spf_record_new");
+		auth_warn(ctx, "spf_record_new: %s", from);
 		return;
 	}
 }
@@ -341,7 +341,7 @@ spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 	if ((ses->spf_mailfrom =
 			spf_record_new(ctx, from, osmtpd_filter_proceed))
 			== NULL) {
-		auth_errx(ctx, "spf_record_new");
+		auth_warn(ctx, "spf_record_new: %s", from);
 		return;
 	}
 }
@@ -2377,6 +2377,7 @@ auth_message_verify(struct message *msg)
 
 	if ((msg->spf_from = spf_record_new(msg->ctx, from, auth_ar_create))
 			== NULL) {
+		auth_warn(msg->ctx, "spf_record_new: %s", from);
 		auth_ar_create(msg->ctx);
 	}
 }
