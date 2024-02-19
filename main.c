@@ -148,7 +148,9 @@ struct spf_record {
 	int nqueries;
 	int running;
 	int done;
-#define SPF_DNS_LOOKUP_LIMIT 10
+/* RFC 7208 Section 4.6.4 limits to 10 DNS lookup,
+ * and one is reserved for the first query.*/
+#define SPF_DNS_LOOKUP_LIMIT 11
 	struct spf_query queries[SPF_DNS_LOOKUP_LIMIT];
 };
 
