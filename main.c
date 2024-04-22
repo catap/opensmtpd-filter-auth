@@ -1877,8 +1877,9 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type,
 		return;
 	}
 
-	if (domain == NULL) {
-		domain = "";
+	if (domain == NULL || !strlen(domain)) {
+		spf_done(spf, SPF_PERMERROR, "Empty domain");
+		return;
 	}
 
 	query = &spf->queries[spf->nqueries];
