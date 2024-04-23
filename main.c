@@ -98,6 +98,9 @@ struct dkim_signature {
 	int z;
 	struct event_asr *query;
 	EVP_PKEY *p;
+	/* RFC 6376 doesn't care about CNAME, use simalr with SPF limit */
+#define DKIM_LOOKUP_LOOKUP_LIMIT 11
+	int nqueries;
 };
 
 /*
@@ -221,6 +224,7 @@ void dkim_signature_parse_s(struct dkim_signature *, const char *, const char *)
 void dkim_signature_parse_t(struct dkim_signature *, const char *, const char *);
 void dkim_signature_parse_x(struct dkim_signature *, const char *, const char *);
 void dkim_signature_parse_z(struct dkim_signature *, const char *, const char *);
+void dkim_lookup_record(struct dkim_signature *sig, const char *domain);
 void dkim_signature_verify(struct dkim_signature *);
 void dkim_signature_header(EVP_MD_CTX *, struct dkim_signature *, struct header *);
 void dkim_signature_state(struct dkim_signature *, enum dkim_state, const char *);
@@ -657,7 +661,6 @@ void
 dkim_signature_parse(struct header *header)
 {
 	struct dkim_signature *sig;
-	struct asr_query *query;
 	const char *buf, *i, *end;
 	char tagname[3];
 	char subdomain[HOST_NAME_MAX + 1];
@@ -783,12 +786,22 @@ dkim_signature_parse(struct header *header)
 		return;
 	}
 
-	if ((query = res_query_async(subdomain, C_IN, T_TXT, NULL)) == NULL) {
-		auth_err(header->msg->ctx, "res_query_async");
+	dkim_lookup_record(sig, subdomain);
+}
+
+void
+dkim_lookup_record(struct dkim_signature *sig, const char *domain)
+{
+	struct asr_query *query;
+
+	sig->nqueries++;
+
+	if ((query = res_query_async(domain, C_IN, T_TXT, NULL)) == NULL) {
+		auth_err(sig->header->msg->ctx, "res_query_async");
 		return;
 	}
 	if ((sig->query = event_asr_run(query, dkim_rr_resolve, sig)) == NULL) {
-		auth_err(header->msg->ctx, "event_asr_run");
+		auth_err(sig->header->msg->ctx, "event_asr_run");
 		asr_abort(query);
 		return;
 	}
@@ -1447,6 +1460,15 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 					  print_dname(q.q_dname, buf, sizeof(buf)),
 					  pack.err);
 			continue;
+		}
+
+		/* If we belowe limit, follow CNAME*/
+		if (rr.rr_type == T_CNAME &&
+			sig->nqueries < DKIM_LOOKUP_LOOKUP_LIMIT ) {
+			print_dname(q.q_dname, buf, sizeof(buf));
+			dkim_lookup_record(sig, buf);
+			free(ar->ar_data);
+			return;
 		}
 
 		if (rr.rr_type != T_TXT) {
