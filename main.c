@@ -1412,6 +1412,7 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 	struct dns_header h;
 	struct dns_query q;
 	struct dns_rr rr;
+	char buf[HOST_NAME_MAX + 1];
 
 	sig->query = NULL;
 
@@ -1431,7 +1432,8 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 	    unpack_query(&pack, &q) != 0) {
 		auth_warn(sig->header->msg->ctx,
 				  "Mallformed DKIM DNS response for domain %s: %s",
-				  q.q_dname, pack.err);
+				  print_dname(q.q_dname, buf, sizeof(buf)),
+				  pack.err);
 		dkim_signature_state(sig, DKIM_PERMERROR, pack.err);
 		goto verify;
 	}
@@ -1440,14 +1442,16 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 		if (unpack_rr(&pack, &rr) != 0) {
 			auth_warn(sig->header->msg->ctx,
 					  "Mallformed DKIM DNS record for domain %s: %s",
-					  q.q_dname, pack.err);
+					  print_dname(q.q_dname, buf, sizeof(buf)),
+					  pack.err);
 			continue;
 		}
 
 		if (rr.rr_type != T_TXT) {
 			auth_warn(sig->header->msg->ctx,
 					  "Unexpected DKIM DNS record: %d for domain %s",
-					  rr.rr_type, q.q_dname);
+					  rr.rr_type,
+					  print_dname(q.q_dname, buf, sizeof(buf)));
 			continue;
 		}
 
@@ -1922,6 +1926,7 @@ spf_resolve(struct asr_result *ar, void *arg)
 	struct dns_header h;
 	struct dns_query q;
 	struct dns_rr rr;
+	char buf[HOST_NAME_MAX + 1];
 
 	query->eva = NULL;
 	query->spf->running--;
@@ -1951,7 +1956,8 @@ spf_resolve(struct asr_result *ar, void *arg)
 	    unpack_query(&pack, &q) != 0) {
 		auth_warn(query->spf->ctx,
 				  "Mallformed SPF DNS response for domain %s: %s",
-				  q.q_dname, pack.err);
+				  print_dname(q.q_dname, buf, sizeof(buf)),
+				  pack.err);
 		spf_done(query->spf, SPF_TEMPERROR, pack.err);
 		goto end;
 	}
@@ -1960,7 +1966,8 @@ spf_resolve(struct asr_result *ar, void *arg)
 		if (unpack_rr(&pack, &rr) != 0) {
 			auth_warn(query->spf->ctx,
 					  "Mallformed SPF DNS record for domain %s: %s",
-					  q.q_dname, pack.err);
+					  print_dname(q.q_dname, buf, sizeof(buf)),
+					  pack.err);
 			continue;
 		}
 
