@@ -224,7 +224,7 @@ void dkim_signature_parse_s(struct dkim_signature *, const char *, const char *)
 void dkim_signature_parse_t(struct dkim_signature *, const char *, const char *);
 void dkim_signature_parse_x(struct dkim_signature *, const char *, const char *);
 void dkim_signature_parse_z(struct dkim_signature *, const char *, const char *);
-void dkim_lookup_record(struct dkim_signature *sig, const char *domain);
+void dkim_lookup_record(struct dkim_signature *sig, char *);
 void dkim_signature_verify(struct dkim_signature *);
 void dkim_signature_header(EVP_MD_CTX *, struct dkim_signature *, struct header *);
 void dkim_signature_state(struct dkim_signature *, enum dkim_state, const char *);
@@ -234,7 +234,7 @@ void dkim_body_parse(struct message *, const char *);
 void dkim_body_verify(struct dkim_signature *);
 void dkim_rr_resolve(struct asr_result *, void *);
 const char *iprev_state2str(enum iprev_state);
-void spf_lookup_record(struct spf_record *, const char *, int,
+void spf_lookup_record(struct spf_record *, char *, int,
 	enum spf_state, int, int);
 void spf_done(struct spf_record *, enum spf_state, const char *);
 void spf_resolve(struct asr_result *, void *);
@@ -255,6 +255,8 @@ ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
     __attribute__((__format__ (printf, 4, 5)));
 int auth_ar_print(struct osmtpd_ctx *, const char *);
 int dkim_key_text_parse(struct dkim_signature *, const char *);
+void auth_domain_wihtout_last_dot(char *);
+
 
 char *authservid;
 EVP_ENCODE_CTX *ectx = NULL;
@@ -790,11 +792,13 @@ dkim_signature_parse(struct header *header)
 }
 
 void
-dkim_lookup_record(struct dkim_signature *sig, const char *domain)
+dkim_lookup_record(struct dkim_signature *sig, char *domain)
 {
 	struct asr_query *query;
 
 	sig->nqueries++;
+
+	auth_domain_wihtout_last_dot(domain);
 
 	if ((query = res_query_async(domain, C_IN, T_TXT, NULL)) == NULL) {
 		auth_err(sig->header->msg->ctx, "res_query_async");
@@ -1894,7 +1898,7 @@ iprev_state2str(enum iprev_state state)
 }
 
 void
-spf_lookup_record(struct spf_record *spf, const char *domain, int type,
+spf_lookup_record(struct spf_record *spf, char *domain, int type,
 	enum spf_state qualifier, int include, int exists)
 {
 	struct asr_query *aq;
@@ -1905,7 +1909,9 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type,
 		return;
 	}
 
-	if (domain == NULL || !strlen(domain)) {
+	auth_domain_wihtout_last_dot(domain);
+
+	if (domain == NULL || domain[0] == '\0') {
 		spf_done(spf, SPF_PERMERROR, "Empty domain");
 		return;
 	}
@@ -2684,6 +2690,19 @@ auth_warn(struct osmtpd_ctx *ctx, const char* format, ...)
     va_end(args);
 
     fprintf(stderr, "\n");
+}
+
+void
+auth_domain_wihtout_last_dot(char *domain)
+{
+	int len;
+
+	if (domain == NULL)
+		return;
+
+	len = strlen(domain);
+	if (domain[len - 1] == '.')
+		domain[len - 1] = '\0';
 }
 
 __dead void
