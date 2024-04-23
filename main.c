@@ -130,6 +130,7 @@ enum spf_state {
 struct spf_query {
 	struct spf_record *spf;
 	struct event_asr *eva;
+	int type;
 	enum spf_state q;
 	int include;
 	int exists;
@@ -237,6 +238,7 @@ void spf_resolve_txt(struct dns_rr *, struct spf_query *);
 void spf_resolve_mx(struct dns_rr *, struct spf_query *);
 void spf_resolve_a(struct dns_rr *, struct spf_query *);
 void spf_resolve_aaaa(struct dns_rr *, struct spf_query *);
+void spf_resolve_cname(struct dns_rr *, struct spf_query *);
 char* spf_parse_txt(const char *, size_t);
 int spf_check_cidr(struct spf_record *, struct in_addr *, int );
 int spf_check_cidr6(struct spf_record *, struct in6_addr *, int );
@@ -1888,6 +1890,7 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type,
 
 	query = &spf->queries[spf->nqueries];
 	query->spf = spf;
+	query->type = type;
 	query->q = qualifier;
 	query->include = include;
 	query->exists = exists;
@@ -1989,6 +1992,10 @@ spf_resolve(struct asr_result *ar, void *arg)
 			spf_resolve_aaaa(&rr, query);
 			break;
 
+		case T_CNAME:
+			spf_resolve_cname(&rr, query);
+			break;
+
 		default:
 			auth_warn(spf->ctx,
 					  "Unexpected SPF DNS record: %d for domain %s",
@@ -2071,6 +2078,17 @@ spf_resolve_aaaa(struct dns_rr *rr, struct spf_query *query)
 	if (spf_check_cidr6(query->spf, &rr->rr.in_aaaa.addr6, 128) == 0) {
 		spf_done(query->spf, query->q, NULL);
 	}
+}
+
+void
+spf_resolve_cname(struct dns_rr *rr, struct spf_query *query)
+{
+	char buf[HOST_NAME_MAX + 1];
+
+	char *domain = print_dname(rr->rr.cname.cname, buf, sizeof(buf));
+
+	spf_lookup_record(query->spf, domain, query->type,
+		query->q, query->include, 0);
 }
 
 char *
