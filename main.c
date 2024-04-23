@@ -1992,7 +1992,7 @@ spf_resolve(struct asr_result *ar, void *arg)
 		default:
 			auth_warn(spf->ctx,
 					  "Unexpected SPF DNS record: %d for domain %s",
-					  rr.rr_type, q.q_dname);
+					  rr.rr_type, query->domain);
 			spf_done(query->spf, SPF_TEMPERROR, "Unexpected record");
 			break;
 		}
