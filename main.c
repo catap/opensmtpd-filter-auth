@@ -2041,14 +2041,11 @@ spf_resolve_mx(struct dns_rr *rr, struct spf_query *query)
 {
 	char buf[HOST_NAME_MAX + 1];
 
-	print_dname(rr->rr.mx.exchange, buf, sizeof(buf));
-	buf[strlen(buf) - 1] = '\0';
-	if (buf[strlen(buf) - 1] == '.')
-		buf[strlen(buf) - 1] = '\0';
+	char *domain = print_dname(rr->rr.mx.exchange, buf, sizeof(buf));
 
-	spf_lookup_record(query->spf, buf, T_A,
+	spf_lookup_record(query->spf, domain, T_A,
 		query->q, query->include, 0);
-	spf_lookup_record(query->spf, buf, T_AAAA,
+	spf_lookup_record(query->spf, domain, T_AAAA,
 		query->q, query->include, 0);
 }
 
