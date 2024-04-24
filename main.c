@@ -1469,7 +1469,7 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 		/* If we belowe limit, follow CNAME*/
 		if (rr.rr_type == T_CNAME &&
 			sig->nqueries < DKIM_LOOKUP_LOOKUP_LIMIT ) {
-			print_dname(q.q_dname, buf, sizeof(buf));
+			print_dname(rr.rr.cname.cname, buf, sizeof(buf));
 			dkim_lookup_record(sig, buf);
 			free(ar->ar_data);
 			return;
@@ -1477,10 +1477,9 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 
 		if (rr.rr_type != T_TXT) {
 			auth_warn(sig->header->msg->ctx,
-					  "Unexpected DKIM DNS record: %d for domain %s at %d request",
+					  "Unexpected DKIM DNS record: %d for domain %s",
 					  rr.rr_type,
-					  print_dname(q.q_dname, buf, sizeof(buf)),
-					  sig->nqueries);
+					  print_dname(q.q_dname, buf, sizeof(buf)));
 			continue;
 		}
 
