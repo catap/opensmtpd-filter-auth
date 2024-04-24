@@ -1477,9 +1477,10 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 
 		if (rr.rr_type != T_TXT) {
 			auth_warn(sig->header->msg->ctx,
-					  "Unexpected DKIM DNS record: %d for domain %s",
+					  "Unexpected DKIM DNS record: %d for domain %s at %d request",
 					  rr.rr_type,
-					  print_dname(q.q_dname, buf, sizeof(buf)));
+					  print_dname(q.q_dname, buf, sizeof(buf)),
+					  sig->nqueries);
 			continue;
 		}
 
