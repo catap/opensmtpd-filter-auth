@@ -447,9 +447,15 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from,
 	}
 
 	from = osmtpd_ltok_skip_cfws(from, 1);
+	if (*from == '"')
+		from = osmtpd_ltok_skip_cfws(from + 1, 1);
 
-	if (strchr(from, '<') != NULL)
+	if (strchr(from, '<') != NULL) {
 		from = osmtpd_ltok_skip_display_name(from, 1);
+		from = osmtpd_ltok_skip_cfws(from, 1);
+		if (*from == '"')
+			from = osmtpd_ltok_skip_cfws(from + 1, 1);
+	}
 
 	if (*from == '<')
 		from++;
