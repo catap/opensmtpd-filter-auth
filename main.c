@@ -335,12 +335,7 @@ spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 
 	snprintf(from, sizeof(from), "postmaster@%s", identity);
 
-	if ((ses->spf_helo =
-			spf_record_new(ctx, from, osmtpd_filter_proceed))
-			== NULL) {
-		auth_warn(ctx, "spf_record_new at spf_identity: '%s'", from);
-		return;
-	}
+	ses->spf_helo = spf_record_new(ctx, from, osmtpd_filter_proceed);
 }
 
 void
@@ -354,12 +349,7 @@ spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 	if (ses->spf_mailfrom)
 		spf_record_free(ses->spf_mailfrom);
 
-	if ((ses->spf_mailfrom =
-			spf_record_new(ctx, from, osmtpd_filter_proceed))
-			== NULL) {
-		auth_warn(ctx, "spf_record_new at spf_mailfrom: '%s'", from);
-		return;
-	}
+	ses->spf_mailfrom = spf_record_new(ctx, from, osmtpd_filter_proceed);
 }
 
 void
@@ -2442,7 +2432,6 @@ auth_message_verify(struct message *msg)
 
 	if ((msg->spf_from = spf_record_new(msg->ctx, from, auth_ar_create))
 			== NULL) {
-		auth_warn(msg->ctx, "spf_record_new at auth_message_verify: '%s'", from);
 		auth_ar_create(msg->ctx);
 	}
 }
