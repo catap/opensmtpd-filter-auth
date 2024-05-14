@@ -2378,15 +2378,6 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 			) == -1) {
 		return -1;
 	}
-	if (spf->state_reason != NULL)
-	{
-		if ((*aroff =
-				auth_ar_cat(line, linelen, *aroff,
-					" reason=\"%s\"", spf->state_reason)
-				) == -1) {
-			return -1;
-		}
-	}
 	if ((*aroff =
 			auth_ar_cat(line, linelen, *aroff,
 				" %s=%s@%s",
@@ -2395,6 +2386,15 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 				spf->sender_domain)
 			) == -1) {
 		return -1;
+	}
+	if (spf->state_reason != NULL)
+	{
+		if ((*aroff =
+				auth_ar_cat(line, linelen, *aroff,
+					" reason=\"%s\"", spf->state_reason)
+				) == -1) {
+			return -1;
+		}
 	}
 
 	return 0;
