@@ -48,19 +48,19 @@
  * Use RFC8601 (Authentication-Results) codes instead of RFC6376 codes,
  * since they're more expressive.
  */
-enum dkim_state {
-	DKIM_UNKNOWN,
-	DKIM_PASS,
-	DKIM_FAIL,
-	DKIM_POLICY,
-	DKIM_NEUTRAL,
-	DKIM_TEMPERROR,
-	DKIM_PERMERROR
+enum ar_state {
+	AR_UNKNOWN,
+	AR_PASS,
+	AR_FAIL,
+	AR_POLICY,
+	AR_NEUTRAL,
+	AR_TEMPERROR,
+	AR_PERMERROR
 };
 
-struct dkim_signature {
+struct ar_signature {
 	struct header *header;
-	enum dkim_state state;
+	enum ar_state state;
 	const char *state_reason;
 	int v;
 	const char *a;
@@ -99,7 +99,7 @@ struct dkim_signature {
 	struct event_asr *query;
 	EVP_PKEY *p;
 	/* RFC 6376 doesn't care about CNAME, use simalr with SPF limit */
-#define DKIM_LOOKUP_LOOKUP_LIMIT 11
+#define AR_LOOKUP_LOOKUP_LIMIT 11
 	int nqueries;
 };
 
@@ -164,7 +164,7 @@ struct header {
 	uint8_t parsed;
 	char *buf;
 	size_t buflen;
-	struct dkim_signature *sig;
+	struct ar_signature *sig;
 };
 
 #define AUTHENTICATION_RESULTS_LINELEN 78
@@ -208,31 +208,31 @@ void *auth_session_new(struct osmtpd_ctx *);
 void auth_session_free(struct osmtpd_ctx *, void *);
 void *auth_message_new(struct osmtpd_ctx *);
 void auth_message_free(struct osmtpd_ctx *, void *);
-void dkim_header_add(struct osmtpd_ctx *, const char *);
-void dkim_signature_parse(struct header *);
-void dkim_signature_parse_v(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_a(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_b(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_bh(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_c(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_d(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_h(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_i(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_l(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_q(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_s(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_t(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_x(struct dkim_signature *, const char *, const char *);
-void dkim_signature_parse_z(struct dkim_signature *, const char *, const char *);
-void dkim_lookup_record(struct dkim_signature *sig, char *);
-void dkim_signature_verify(struct dkim_signature *);
-void dkim_signature_header(EVP_MD_CTX *, struct dkim_signature *, struct header *);
-void dkim_signature_state(struct dkim_signature *, enum dkim_state, const char *);
-const char *dkim_state2str(enum dkim_state);
-void dkim_header_cat(struct osmtpd_ctx *, const char *);
-void dkim_body_parse(struct message *, const char *);
-void dkim_body_verify(struct dkim_signature *);
-void dkim_rr_resolve(struct asr_result *, void *);
+void ar_header_add(struct osmtpd_ctx *, const char *);
+void ar_signature_parse(struct header *);
+void ar_signature_parse_v(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_a(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_b(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_bh(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_c(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_d(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_h(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_i(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_l(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_q(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_s(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_t(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_x(struct ar_signature *, const char *, const char *);
+void ar_signature_parse_z(struct ar_signature *, const char *, const char *);
+void ar_lookup_record(struct ar_signature *sig, char *);
+void ar_signature_verify(struct ar_signature *);
+void ar_signature_header(EVP_MD_CTX *, struct ar_signature *, struct header *);
+void ar_signature_state(struct ar_signature *, enum ar_state, const char *);
+const char *ar_state2str(enum ar_state);
+void ar_header_cat(struct osmtpd_ctx *, const char *);
+void ar_body_parse(struct message *, const char *);
+void ar_body_verify(struct ar_signature *);
+void ar_rr_resolve(struct asr_result *, void *);
 const char *iprev_state2str(enum iprev_state);
 void spf_lookup_record(struct spf_record *, char *, int,
 	enum spf_state, int, int);
@@ -254,7 +254,7 @@ void auth_ar_create(struct osmtpd_ctx *);
 ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
     __attribute__((__format__ (printf, 4, 5)));
 int auth_ar_print(struct osmtpd_ctx *, const char *);
-int dkim_key_text_parse(struct dkim_signature *, const char *);
+int ar_key_text_parse(struct ar_signature *, const char *);
 void auth_domain_wihtout_last_dot(char *);
 
 
@@ -377,27 +377,27 @@ auth_dataline(struct osmtpd_ctx *ctx, const char *line)
 			for (i = 0; i < msg->nheaders; i++) {
 				if (msg->header[i].sig == NULL)
 					continue;
-				dkim_body_verify(msg->header[i].sig);
+				ar_body_verify(msg->header[i].sig);
 			}
 			auth_message_verify(msg);
 			return;
 		}
 	}
 	if (msg->parsing_headers) {
-		dkim_header_add(ctx, line);
+		ar_header_add(ctx, line);
 		if (line[0] == '\0') {
 			msg->parsing_headers = 0;
 			for (i = 0; i < msg->nheaders; i++) {
 				if (msg->header[i].sig == NULL)
 					continue;
 				if (msg->header[i].sig->query == NULL)
-					dkim_signature_verify(
+					ar_signature_verify(
 					    msg->header[i].sig);
 			}
 		}
 		return;
 	} else {
-		dkim_body_parse(msg, line);
+		ar_body_parse(msg, line);
 	}
 }
 
@@ -586,7 +586,7 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 }
 
 void
-dkim_header_add(struct osmtpd_ctx *ctx, const char *line)
+ar_header_add(struct osmtpd_ctx *ctx, const char *line)
 {
 	struct message *msg = ctx->local_message;
 	const char *start, *end, *verify;
@@ -606,12 +606,12 @@ dkim_header_add(struct osmtpd_ctx *ctx, const char *line)
 			    strncasecmp(
 			    start, "DKIM-Signature", end - start) == 0 &&
 			    verify[0] == ':')
-				dkim_signature_parse(
+				ar_signature_parse(
 				    &msg->header[msg->nheaders - 1]);
 			if (line[0] == '\0')
 				return;
 		} else {
-			dkim_header_cat(ctx, line);
+			ar_header_cat(ctx, line);
 			return;
 		}
 	}
@@ -630,11 +630,11 @@ dkim_header_add(struct osmtpd_ctx *ctx, const char *line)
 	}
 	msg->header[msg->nheaders].msg = msg;
 	msg->nheaders++;
-	dkim_header_cat(ctx, line);
+	ar_header_cat(ctx, line);
 }
 
 void
-dkim_header_cat(struct osmtpd_ctx *ctx, const char *line)
+ar_header_cat(struct osmtpd_ctx *ctx, const char *line)
 {
 	struct message *msg = ctx->local_message;
 	struct header *header = &msg->header[msg->nheaders - 1];
@@ -656,15 +656,15 @@ dkim_header_cat(struct osmtpd_ctx *ctx, const char *line)
 }
 
 void
-dkim_signature_parse(struct header *header)
+ar_signature_parse(struct header *header)
 {
-	struct dkim_signature *sig;
+	struct ar_signature *sig;
 	const char *buf, *i, *end;
 	char tagname[3];
 	char subdomain[HOST_NAME_MAX + 1];
 	size_t ilen, dlen;
 
-	/* Format checked by dkim_header_add */
+	/* Format checked by ar_header_add */
 	buf = osmtpd_ltok_skip_field_name(header->buf, 0);
 	buf = osmtpd_ltok_skip_wsp(buf, 1) + 1;
 
@@ -680,7 +680,7 @@ dkim_signature_parse(struct header *header)
 
 	end = osmtpd_ltok_skip_tag_list(buf, 0);
 	if (end == NULL || end[0] != '\0') {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid tag-list");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid tag-list");
 		return;
 	}
 
@@ -698,61 +698,61 @@ dkim_signature_parse(struct header *header)
 		buf = osmtpd_ltok_skip_fws(buf + 1, 1);
 		end = osmtpd_ltok_skip_tag_value(buf, 1);
 		if (strcmp(tagname, "v") == 0)
-			dkim_signature_parse_v(sig, buf, end);
+			ar_signature_parse_v(sig, buf, end);
 		else if (strcmp(tagname, "a") == 0)
-			dkim_signature_parse_a(sig, buf, end);
+			ar_signature_parse_a(sig, buf, end);
 		else if (strcmp(tagname, "b") == 0)
-			dkim_signature_parse_b(sig, buf, end);
+			ar_signature_parse_b(sig, buf, end);
 		else if (strcmp(tagname, "bh") == 0)
-			dkim_signature_parse_bh(sig, buf, end);
+			ar_signature_parse_bh(sig, buf, end);
 		else if (strcmp(tagname, "c") == 0)
-			dkim_signature_parse_c(sig, buf, end);
+			ar_signature_parse_c(sig, buf, end);
 		else if (strcmp(tagname, "d") == 0)
-			dkim_signature_parse_d(sig, buf, end);
+			ar_signature_parse_d(sig, buf, end);
 		else if (strcmp(tagname, "h") == 0)
-			dkim_signature_parse_h(sig, buf, end);
+			ar_signature_parse_h(sig, buf, end);
 		else if (strcmp(tagname, "i") == 0)
-			dkim_signature_parse_i(sig, buf, end);
+			ar_signature_parse_i(sig, buf, end);
 		else if (strcmp(tagname, "l") == 0)
-			dkim_signature_parse_l(sig, buf, end);
+			ar_signature_parse_l(sig, buf, end);
 		else if (strcmp(tagname, "q") == 0)
-			dkim_signature_parse_q(sig, buf, end);
+			ar_signature_parse_q(sig, buf, end);
 		else if (strcmp(tagname, "s") == 0)
-			dkim_signature_parse_s(sig, buf, end);
+			ar_signature_parse_s(sig, buf, end);
 		else if (strcmp(tagname, "t") == 0)
-			dkim_signature_parse_t(sig, buf, end);
+			ar_signature_parse_t(sig, buf, end);
 		else if (strcmp(tagname, "x") == 0)
-			dkim_signature_parse_x(sig, buf, end);
+			ar_signature_parse_x(sig, buf, end);
 		else if (strcmp(tagname, "z") == 0)
-			dkim_signature_parse_z(sig, buf, end);
+			ar_signature_parse_z(sig, buf, end);
 
 		buf = osmtpd_ltok_skip_fws(end, 1);
 		if (buf[0] == ';')
 			buf++;
 		else if (buf[0] != '\0') {
-			dkim_signature_state(sig, DKIM_PERMERROR,
+			ar_signature_state(sig, AR_PERMERROR,
 			    "Invalid tag-list");
 			return;
 		}
 	}
-	if (sig->state != DKIM_UNKNOWN)
+	if (sig->state != AR_UNKNOWN)
 		return;
 
 	if (sig->v != 1)
-		dkim_signature_state(sig, DKIM_PERMERROR, "Missing v tag");
+		ar_signature_state(sig, AR_PERMERROR, "Missing v tag");
 	else if (sig->ah == NULL)
-		dkim_signature_state(sig, DKIM_PERMERROR, "Missing a tag");
+		ar_signature_state(sig, AR_PERMERROR, "Missing a tag");
 	else if (sig->b == NULL)
-		dkim_signature_state(sig, DKIM_PERMERROR, "Missing b tag");
+		ar_signature_state(sig, AR_PERMERROR, "Missing b tag");
 	else if (sig->bhsz == 0)
-		dkim_signature_state(sig, DKIM_PERMERROR, "Missing bh tag");
+		ar_signature_state(sig, AR_PERMERROR, "Missing bh tag");
 	else if (sig->d[0] == '\0')
-		dkim_signature_state(sig, DKIM_PERMERROR, "Missing d tag");
+		ar_signature_state(sig, AR_PERMERROR, "Missing d tag");
 	else if (sig->h == NULL)
-		dkim_signature_state(sig, DKIM_PERMERROR, "Missing h tag");
+		ar_signature_state(sig, AR_PERMERROR, "Missing h tag");
 	else if (sig->s[0] == '\0')
-		dkim_signature_state(sig, DKIM_PERMERROR, "Missing s tag");
-	if (sig->state != DKIM_UNKNOWN)
+		ar_signature_state(sig, AR_PERMERROR, "Missing s tag");
+	if (sig->state != AR_UNKNOWN)
 		return;
 
 	if (sig->i != NULL) {
@@ -760,35 +760,35 @@ dkim_signature_parse(struct header *header)
 		ilen = sig->isz - (size_t)(i - sig->i);
 		dlen = strlen(sig->d);
 		if (ilen < dlen) {
-			dkim_signature_state(sig, DKIM_PERMERROR,
+			ar_signature_state(sig, AR_PERMERROR,
 			    "i tag not subdomain of d");
 			return;
 		}
 		i += ilen - dlen;
 		if ((i[-1] != '.' && i[-1] != '@') ||
 		    strncasecmp(i, sig->d, dlen) != 0) {
-			dkim_signature_state(sig, DKIM_PERMERROR,
+			ar_signature_state(sig, AR_PERMERROR,
 			    "i tag not subdomain of d");
 			return;
 		}
 	}
 	if (sig->t != -1 && sig->x != -1 && sig->t > sig->x) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "t tag after x tag");
+		ar_signature_state(sig, AR_PERMERROR, "t tag after x tag");
 		return;
 	}
 
 	if ((size_t)snprintf(subdomain, sizeof(subdomain), "%s._domainkey.%s",
 	    sig->s, sig->d) >= sizeof(subdomain)) {
-		dkim_signature_state(sig, DKIM_PERMERROR,
+		ar_signature_state(sig, AR_PERMERROR,
 		    "dns/txt query too long");
 		return;
 	}
 
-	dkim_lookup_record(sig, subdomain);
+	ar_lookup_record(sig, subdomain);
 }
 
 void
-dkim_lookup_record(struct dkim_signature *sig, char *domain)
+ar_lookup_record(struct ar_signature *sig, char *domain)
 {
 	struct asr_query *query;
 
@@ -800,7 +800,7 @@ dkim_lookup_record(struct dkim_signature *sig, char *domain)
 		auth_err(sig->header->msg->ctx, "res_query_async");
 		return;
 	}
-	if ((sig->query = event_asr_run(query, dkim_rr_resolve, sig)) == NULL) {
+	if ((sig->query = event_asr_run(query, ar_rr_resolve, sig)) == NULL) {
 		auth_err(sig->header->msg->ctx, "event_asr_run");
 		asr_abort(query);
 		return;
@@ -808,31 +808,31 @@ dkim_lookup_record(struct dkim_signature *sig, char *domain)
 }
 
 void
-dkim_signature_parse_v(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_v(struct ar_signature *sig, const char *start, const char *end)
 {
 	if (sig->v != 0) {	/* Duplicate tag */
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate v tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate v tag");
 		return;
 	}
 	/* Unsupported version */
 	if (start[0] != '1' || start + 1 != end)
-		dkim_signature_state(sig, DKIM_NEUTRAL, "Unsupported v tag");
+		ar_signature_state(sig, AR_NEUTRAL, "Unsupported v tag");
 	else
 		sig->v = 1;
 }
 
 void
-dkim_signature_parse_a(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_a(struct ar_signature *sig, const char *start, const char *end)
 {
 	char ah[sizeof("sha256")];
 
 	if (sig->ah != NULL) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate a tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate a tag");
 		return;
 	}
 
 	if (osmtpd_ltok_skip_sig_a_tag_alg(start, 0) != end) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid a tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid a tag");
 		return;
 	}
 	sig->a = start;
@@ -848,17 +848,17 @@ dkim_signature_parse_a(struct dkim_signature *sig, const char *start, const char
 		sig->sephash = 1;
 #endif
 	} else {
-		dkim_signature_state(sig, DKIM_NEUTRAL, "Unsuppored a tag k");
+		ar_signature_state(sig, AR_NEUTRAL, "Unsuppored a tag k");
 		return;
 	}
 	if ((size_t)(end - start) >= sizeof(ah)) {
-		dkim_signature_state(sig, DKIM_NEUTRAL, "Unsuppored a tag h");
+		ar_signature_state(sig, AR_NEUTRAL, "Unsuppored a tag h");
 		return;
 	}
 	strlcpy(ah, start, sizeof(ah));
 	ah[end - start] = '\0';
 	if ((sig->ah = EVP_get_digestbyname(ah)) == NULL) {
-		dkim_signature_state(sig, DKIM_NEUTRAL, "Unsuppored a tag h");
+		ar_signature_state(sig, AR_NEUTRAL, "Unsuppored a tag h");
 		return;
 	}
 	if ((sig->bhctx = EVP_MD_CTX_new()) == NULL) {
@@ -872,12 +872,12 @@ dkim_signature_parse_a(struct dkim_signature *sig, const char *start, const char
 }
 
 void
-dkim_signature_parse_b(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_b(struct ar_signature *sig, const char *start, const char *end)
 {
 	int decodesz;
 
 	if (sig->b != NULL) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate b tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate b tag");
 		return;
 	}
 	sig->bheader = start;
@@ -889,27 +889,27 @@ dkim_signature_parse_b(struct dkim_signature *sig, const char *start, const char
 	EVP_DecodeInit(ectx);
 	if (EVP_DecodeUpdate(ectx, sig->b, &decodesz, start,
 	    (int)(end - start)) == -1) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid b tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid b tag");
 		return;
 	}
 	sig->bsz = decodesz;
 	if (EVP_DecodeFinal(ectx, sig->b + sig->bsz,
 	    &decodesz) == -1) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid b tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid b tag");
 		return;
 	}
 	sig->bsz += decodesz;
 }
 
 void
-dkim_signature_parse_bh(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_bh(struct ar_signature *sig, const char *start, const char *end)
 {
 	const char *b64;
 	size_t n;
 	int decodesz;
 
 	if (sig->bhsz != 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate bh tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate bh tag");
 		return;
 	}
 	/*
@@ -935,7 +935,7 @@ dkim_signature_parse_bh(struct dkim_signature *sig, const char *start, const cha
 	}
 	/* Invalid tag value */
 	if (b64 != end || n % 4 != 0 || (n / 4) * 3 > sizeof(sig->bh)) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid bh tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid bh tag");
 		return;
 	}
 	/* EVP_DecodeBlock doesn't handle internal whitespace */
@@ -943,23 +943,23 @@ dkim_signature_parse_bh(struct dkim_signature *sig, const char *start, const cha
 	if (EVP_DecodeUpdate(ectx, sig->bh, &decodesz, start,
 	    (int)(end - start)) == -1) {
 		/* Paranoia check */
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid bh tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid bh tag");
 		return;
 	}
 	sig->bhsz = decodesz;
 	if (EVP_DecodeFinal(ectx, sig->bh + sig->bhsz, &decodesz) == -1) {
 		/* Paranoia check */
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid bh tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid bh tag");
 		return;
 	}
 	sig->bhsz += decodesz;
 }
 
 void
-dkim_signature_parse_c(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_c(struct ar_signature *sig, const char *start, const char *end)
 {
 	if (sig->c != 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate c tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate c tag");
 		return;
 	}
 	if (strncmp(start, "simple", 6) == 0) {
@@ -969,7 +969,7 @@ dkim_signature_parse_c(struct dkim_signature *sig, const char *start, const char
 		sig->c = CANON_HEADER_RELAXED;
 		start += 7;
 	} else {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid c tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid c tag");
 		return;
 	}
 	if (start[0] == '/') {
@@ -981,52 +981,52 @@ dkim_signature_parse_c(struct dkim_signature *sig, const char *start, const char
 			sig->c |= CANON_BODY_RELAXED;
 			start += 7;
 		} else {
-			dkim_signature_state(sig, DKIM_PERMERROR,
+			ar_signature_state(sig, AR_PERMERROR,
 			    "Invalid c tag");
 			return;
 		}
 	}
 
 	if (start != end) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid c tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid c tag");
 		return;
 	}
 	sig->c |= CANON_DONE;
 }
 
 void
-dkim_signature_parse_d(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_d(struct ar_signature *sig, const char *start, const char *end)
 {
 	if (sig->d[0] != '\0') {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate d tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate d tag");
 		return;
 	}
 	if (osmtpd_ltok_skip_sig_d_tag_value(start, 0) != end ||
 	    (size_t)(end - start) >= sizeof(sig->d)) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid d tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid d tag");
 		return;
 	}
 	strlcpy(sig->d, start, end - start + 1);
 }
 
 void
-dkim_signature_parse_h(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_h(struct ar_signature *sig, const char *start, const char *end)
 {
 	const char *h;
 	size_t n = 0;
 
 	if (sig->h != NULL) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate h tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate h tag");
 		return;
 	}
 	if (osmtpd_ltok_skip_sig_h_tag_value(start, 0) < end) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid h tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid h tag");
 		return;
 	}
 	h = start;
 	while (1) {
 		if ((h = osmtpd_ltok_skip_hdr_name(h, 0)) == NULL) {
-			dkim_signature_state(sig, DKIM_PERMERROR,
+			ar_signature_state(sig, AR_PERMERROR,
 			    "Invalid h tag");
 			return;
 		}
@@ -1066,14 +1066,14 @@ dkim_signature_parse_h(struct dkim_signature *sig, const char *start, const char
 }
 
 void
-dkim_signature_parse_i(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_i(struct ar_signature *sig, const char *start, const char *end)
 {
 	if (sig->i != NULL) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate i tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate i tag");
 		return;
 	}
 	if (osmtpd_ltok_skip_sig_i_tag_value(start, 0) != end) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid i tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid i tag");
 		return;
 	}
 	sig->i = start;
@@ -1081,13 +1081,13 @@ dkim_signature_parse_i(struct dkim_signature *sig, const char *start, const char
 }
 
 void
-dkim_signature_parse_l(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_l(struct ar_signature *sig, const char *start, const char *end)
 {
 	long long l;
 	char *lend;
 
 	if (sig->l != -1) {	/* Duplicate tag */
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate l tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate l tag");
 		return;
 	}
 	errno = 0;
@@ -1095,23 +1095,23 @@ dkim_signature_parse_l(struct dkim_signature *sig, const char *start, const char
 	/* > 76 digits in stroll is an overflow */
 	if (osmtpd_ltok_skip_digit(start, 0) == NULL ||
 	    lend != end || errno != 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid l tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid l tag");
 		return;
 	}
 	if (l > SSIZE_MAX) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "l tag too large");
+		ar_signature_state(sig, AR_PERMERROR, "l tag too large");
 		return;
 	}
 	sig->l = (ssize_t)l;
 }
 
 void
-dkim_signature_parse_q(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_q(struct ar_signature *sig, const char *start, const char *end)
 {
 	const char *qend;
 
 	if (sig->q != 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate q tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate q tag");
 		return;
 	}
 
@@ -1119,7 +1119,7 @@ dkim_signature_parse_q(struct dkim_signature *sig, const char *start, const char
 		start = osmtpd_ltok_skip_fws(start, 1);
 		qend = osmtpd_ltok_skip_sig_q_tag_method(start, 0);
 		if (qend == NULL) {
-			dkim_signature_state(sig, DKIM_PERMERROR, "Invalid q tag");
+			ar_signature_state(sig, AR_PERMERROR, "Invalid q tag");
 			return;
 		}
 		if (strncmp(start, "dns/txt", qend - start) == 0)
@@ -1129,83 +1129,83 @@ dkim_signature_parse_q(struct dkim_signature *sig, const char *start, const char
 			break;
 	}
 	if (start != end) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid q tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid q tag");
 		return;
 	}
 	if (sig->q != 1) {
 		sig->q = 1;
-		dkim_signature_state(sig, DKIM_NEUTRAL, "No useable q found");
+		ar_signature_state(sig, AR_NEUTRAL, "No useable q found");
 		return;
 	}
 }
 
 void
-dkim_signature_parse_s(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_s(struct ar_signature *sig, const char *start, const char *end)
 {
 	if (sig->s[0] != '\0') {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate s tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate s tag");
 		return;
 	}
 	if (osmtpd_ltok_skip_selector(start, 0) != end) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid s tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid s tag");
 		return;
 	}
 	strlcpy(sig->s, start, end - start + 1);
 }
 
 void
-dkim_signature_parse_t(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_t(struct ar_signature *sig, const char *start, const char *end)
 {
 	char *tend;
 
 	if (sig->t != -1) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate t tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate t tag");
 		return;
 	}
 	errno = 0;
 	sig->t = strtoll(start, &tend, 10);
 	if (osmtpd_ltok_skip_digit(start, 0) == NULL || tend != end ||
 	    tend - start > 12 || errno != 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid t tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid t tag");
 		return;
 	}
 }
 
 void
-dkim_signature_parse_x(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_x(struct ar_signature *sig, const char *start, const char *end)
 {
 	char *xend;
 
 	if (sig->x != -1) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate x tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate x tag");
 		return;
 	}
 	errno = 0;
 	sig->x = strtoll(start, &xend, 10);
 	if (osmtpd_ltok_skip_digit(start, 0) == NULL || xend != end ||
 	    xend - start > 12 || errno != 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid x tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid x tag");
 		return;
 	}
 }
 
 void
-dkim_signature_parse_z(struct dkim_signature *sig, const char *start, const char *end)
+ar_signature_parse_z(struct ar_signature *sig, const char *start, const char *end)
 {
 	if (sig->z != 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate z tag");
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate z tag");
 		return;
 	}
 
 	sig->z = 1;
 	if (osmtpd_ltok_skip_sig_z_tag_value(start, 0) != end) {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid z tag");
+		ar_signature_state(sig, AR_PERMERROR, "Invalid z tag");
 		return;
 	}
 }
 
 void
-dkim_signature_verify(struct dkim_signature *sig)
+ar_signature_verify(struct ar_signature *sig)
 {
 	struct message *msg = sig->header->msg;
 	static EVP_MD_CTX *bctx = NULL;
@@ -1214,7 +1214,7 @@ dkim_signature_verify(struct dkim_signature *sig)
 	const char *end;
 	size_t i, header;
 
-	if (sig->state != DKIM_UNKNOWN)
+	if (sig->state != AR_UNKNOWN)
 		return;
 
 	if (bctx == NULL) {
@@ -1252,15 +1252,15 @@ dkim_signature_verify(struct dkim_signature *sig)
 			    msg->header[i].buf + strlen(sig->h[header]), 1);
 			if (end[0] != ':')
 				continue;
-			dkim_signature_header(bctx, sig, &(msg->header[i]));
+			ar_signature_header(bctx, sig, &(msg->header[i]));
 			msg->header[i].parsed = 1;
 			break;
 		}
 	}
-	dkim_signature_header(bctx, sig, sig->header);
+	ar_signature_header(bctx, sig, sig->header);
 	if (!sig->sephash) {
 		if (EVP_DigestVerifyFinal(bctx, sig->b, sig->bsz) != 1)
-			dkim_signature_state(sig, DKIM_FAIL, "b mismatch");
+			ar_signature_state(sig, AR_FAIL, "b mismatch");
 	} else {
 		if (EVP_DigestFinal_ex(bctx, digest, &digestsz) == 0) {
 			auth_errx(msg->ctx, "EVP_DigestFinal_ex");
@@ -1275,7 +1275,7 @@ dkim_signature_verify(struct dkim_signature *sig)
 		case 1:
 			break;
 		case 0:
-			dkim_signature_state(sig, DKIM_FAIL, "b mismatch");
+			ar_signature_state(sig, AR_FAIL, "b mismatch");
 			break;
 		default:
 			auth_errx(msg->ctx, "EVP_DigestVerify");
@@ -1285,12 +1285,12 @@ dkim_signature_verify(struct dkim_signature *sig)
 }
 
 /* EVP_DigestVerifyUpdate is a macro, so we can't alias this on a variable */
-#define dkim_b_digest_update(a, b, c)					\
+#define ar_b_digest_update(a, b, c)					\
 	(sig->sephash ? EVP_DigestUpdate((a), (b), (c)) :\
 	    EVP_DigestVerifyUpdate((a), (b), (c)))
 
 void
-dkim_signature_header(EVP_MD_CTX *bctx, struct dkim_signature *sig,
+ar_signature_header(EVP_MD_CTX *bctx, struct ar_signature *sig,
     struct header *header)
 {
 	char c;
@@ -1311,9 +1311,9 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct dkim_signature *sig,
 					ptr = osmtpd_ltok_skip_fws(
 					    ptr + 1, 1) - 1;
 			}
-			if (dkim_b_digest_update(bctx, &c, 1) == 0) {
+			if (ar_b_digest_update(bctx, &c, 1) == 0) {
 				auth_errx(sig->header->msg->ctx,
-				    "dkim_b_digest_update");
+				    "ar_b_digest_update");
 				return;
 			}
 			continue;
@@ -1325,25 +1325,25 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct dkim_signature *sig,
 				    ptr, 0) - 1;
 				continue;
 			}
-			if (dkim_b_digest_update(bctx, ptr, 1) == 0) {
+			if (ar_b_digest_update(bctx, ptr, 1) == 0) {
 				auth_errx(sig->header->msg->ctx,
-				    "dkim_b_digest_update");
+				    "ar_b_digest_update");
 				return;
 			}
 		} else {
 			if (canon == CANON_HEADER_RELAXED) {
 				if (end[0] == '\0')
 					continue;
-				if (dkim_b_digest_update(bctx, " ", 1) == 0) {
+				if (ar_b_digest_update(bctx, " ", 1) == 0) {
 					auth_errx(sig->header->msg->ctx,
-					    "dkim_b_digest_update");
+					    "ar_b_digest_update");
 					return;
 				}
 			} else {
-				if (dkim_b_digest_update(bctx, ptr,
+				if (ar_b_digest_update(bctx, ptr,
 				    end - ptr) == 0) {
 					auth_errx(sig->header->msg->ctx,
-					    "dkim_b_digest_update");
+					    "ar_b_digest_update");
 					return;
 				}
 			}
@@ -1352,15 +1352,15 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct dkim_signature *sig,
 			
 	}
 	if (sig->header != header) {
-		if (dkim_b_digest_update(bctx, "\r\n", 2) == 0) {
-			auth_errx(sig->header->msg->ctx, "dkim_b_digest_update");
+		if (ar_b_digest_update(bctx, "\r\n", 2) == 0) {
+			auth_errx(sig->header->msg->ctx, "ar_b_digest_update");
 			return;
 		}
 	}
 }
 
 void
-dkim_signature_state(struct dkim_signature *sig, enum dkim_state state,
+ar_signature_state(struct ar_signature *sig, enum ar_state state,
     const char *reason)
 {
 	if (sig->query != NULL) {
@@ -1368,26 +1368,26 @@ dkim_signature_state(struct dkim_signature *sig, enum dkim_state state,
 		sig->query = NULL;
 	}
 	switch (sig->state) {
-	case DKIM_UNKNOWN:
+	case AR_UNKNOWN:
 		break;
-	case DKIM_PASS:
-	case DKIM_FAIL:
+	case AR_PASS:
+	case AR_FAIL:
 		osmtpd_errx(1, "Unexpected transition");
-	case DKIM_POLICY:
-		if (state == DKIM_PASS)
+	case AR_POLICY:
+		if (state == AR_PASS)
 			return;
 		break;
-	case DKIM_NEUTRAL:
-		if (state == DKIM_PASS)
+	case AR_NEUTRAL:
+		if (state == AR_PASS)
 			return;
-		if (state == DKIM_TEMPERROR || state == DKIM_PERMERROR)
+		if (state == AR_TEMPERROR || state == AR_PERMERROR)
 			break;
 		osmtpd_errx(1, "Unexpected transition");
-	case DKIM_TEMPERROR:
-		if (state == DKIM_PERMERROR)
+	case AR_TEMPERROR:
+		if (state == AR_PERMERROR)
 			break;
 		return;
-	case DKIM_PERMERROR:
+	case AR_PERMERROR:
 		return;
 	}
 	sig->state = state;
@@ -1395,31 +1395,31 @@ dkim_signature_state(struct dkim_signature *sig, enum dkim_state state,
 }
 
 const char *
-dkim_state2str(enum dkim_state state)
+ar_state2str(enum ar_state state)
 {
 	switch (state)
 	{
-	case DKIM_UNKNOWN:
+	case AR_UNKNOWN:
 		return "unknown";
-	case DKIM_PASS:
+	case AR_PASS:
 		return "pass";
-	case DKIM_FAIL:
+	case AR_FAIL:
 		return "fail";
-	case DKIM_POLICY:
+	case AR_POLICY:
 		return "policy";
-	case DKIM_NEUTRAL:
+	case AR_NEUTRAL:
 		return "neutral";
-	case DKIM_TEMPERROR:
+	case AR_TEMPERROR:
 		return "temperror";
-	case DKIM_PERMERROR:
+	case AR_PERMERROR:
 		return "permerror";
 	}
 }
 
 void
-dkim_rr_resolve(struct asr_result *ar, void *arg)
+ar_rr_resolve(struct asr_result *ar, void *arg)
 {
-	struct dkim_signature *sig = arg;
+	struct ar_signature *sig = arg;
 	char key[UINT16_MAX + 1];
 	const char *rr_txt;
 	size_t keylen, cstrlen;
@@ -1432,12 +1432,12 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 	sig->query = NULL;
 
 	if (ar->ar_h_errno == TRY_AGAIN || ar->ar_h_errno == NO_RECOVERY) {
-		dkim_signature_state(sig, DKIM_TEMPERROR,
+		ar_signature_state(sig, AR_TEMPERROR,
 		    hstrerror(ar->ar_h_errno));
 		goto verify;
 	}
 	if (ar->ar_h_errno != NETDB_SUCCESS) {
-		dkim_signature_state(sig, DKIM_PERMERROR,
+		ar_signature_state(sig, AR_PERMERROR,
 		    hstrerror(ar->ar_h_errno));
 		goto verify;
 	}
@@ -1449,7 +1449,7 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 				  "Mallformed DKIM DNS response for domain %s: %s",
 				  print_dname(q.q_dname, buf, sizeof(buf)),
 				  pack.err);
-		dkim_signature_state(sig, DKIM_PERMERROR, pack.err);
+		ar_signature_state(sig, AR_PERMERROR, pack.err);
 		goto verify;
 	}
 
@@ -1464,9 +1464,9 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 
 		/* If we belowe limit, follow CNAME*/
 		if (rr.rr_type == T_CNAME &&
-			sig->nqueries < DKIM_LOOKUP_LOOKUP_LIMIT ) {
+			sig->nqueries < AR_LOOKUP_LOOKUP_LIMIT ) {
 			print_dname(rr.rr.cname.cname, buf, sizeof(buf));
-			dkim_lookup_record(sig, buf);
+			ar_lookup_record(sig, buf);
 			free(ar->ar_data);
 			return;
 		}
@@ -1499,17 +1499,17 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 		if (rr.rr.other.rdlen > 0)	/* Invalid TXT RDATA */
 			continue;
 
-		if (dkim_key_text_parse(sig, key))
+		if (ar_key_text_parse(sig, key))
 			break;
 	}
 
 	if (h.ancount == 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR,
+		ar_signature_state(sig, AR_PERMERROR,
 		    "No matching key found");
 	} else {
 		/* Only verify if all headers have been read */
 		if (!sig->header->msg->parsing_headers)
-			dkim_signature_verify(sig);
+			ar_signature_verify(sig);
 	}
  verify:
 	free(ar->ar_data);
@@ -1517,7 +1517,7 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 }
 
 int
-dkim_key_text_parse(struct dkim_signature *sig, const char *key)
+ar_key_text_parse(struct ar_signature *sig, const char *key)
 {
 	char tagname, *hashname;
 	const char *end, *tagvend;
@@ -1710,7 +1710,7 @@ dkim_key_text_parse(struct dkim_signature *sig, const char *key)
 		return 0;
 
 	if (pkraw[0] == '\0') {
-		dkim_signature_state(sig, DKIM_PERMERROR, "Key is revoked");
+		ar_signature_state(sig, AR_PERMERROR, "Key is revoked");
 		return 1;
 	}
 
@@ -1769,9 +1769,9 @@ dkim_key_text_parse(struct dkim_signature *sig, const char *key)
 }
 
 void
-dkim_body_parse(struct message *msg, const char *line)
+ar_body_parse(struct message *msg, const char *line)
 {
-	struct dkim_signature *sig;
+	struct ar_signature *sig;
 	const char *end = line, *hash, *prev;
 	size_t hashn, len, i;
 	int wsp, ret;
@@ -1784,7 +1784,7 @@ dkim_body_parse(struct message *msg, const char *line)
 	while (msg->body_whitelines-- > 0) {
 		for (i = 0; i < msg->nheaders; i++) {
 			if ((sig = msg->header[i].sig) == NULL ||
-			    sig->state != DKIM_UNKNOWN)
+			    sig->state != AR_UNKNOWN)
 				continue;
 			hashn = sig->l == -1 ? 2 : MIN(2, sig->l);
 			sig->l -= sig->l == -1 ? 0 : hashn;
@@ -1812,7 +1812,7 @@ dkim_body_parse(struct message *msg, const char *line)
 		}
 		for (i = 0; i < msg->nheaders; i++) {
 			sig = msg->header[i].sig;
-			if (sig == NULL || sig->state != DKIM_UNKNOWN)
+			if (sig == NULL || sig->state != AR_UNKNOWN)
 				continue;
 			if (wsp &&
 			    (sig->c & CANON_BODY) == CANON_BODY_RELAXED) {
@@ -1834,7 +1834,7 @@ dkim_body_parse(struct message *msg, const char *line)
 	}
 	for (i = 0; i < msg->nheaders; i++) {
 		sig = msg->header[i].sig;
-		if (sig == NULL || sig->state != DKIM_UNKNOWN)
+		if (sig == NULL || sig->state != AR_UNKNOWN)
 			continue;
 		hashn = sig->l == -1 ? 2 : MIN(2, sig->l);
 		sig->l -= sig->l == -1 ? 0 : hashn;
@@ -1847,12 +1847,12 @@ dkim_body_parse(struct message *msg, const char *line)
 }
 
 void
-dkim_body_verify(struct dkim_signature *sig)
+ar_body_verify(struct ar_signature *sig)
 {
 	unsigned char digest[EVP_MAX_MD_SIZE];
 	unsigned int digestsz;
 
-	if (sig->state != DKIM_UNKNOWN)
+	if (sig->state != AR_UNKNOWN)
 		return;
 
 	if ((sig->c & CANON_BODY) == CANON_BODY_SIMPLE &&
@@ -1865,7 +1865,7 @@ dkim_body_verify(struct dkim_signature *sig)
 		}
 	}
 	if (sig->l > 0) {
-		dkim_signature_state(sig, DKIM_PERMERROR,
+		ar_signature_state(sig, AR_PERMERROR,
 		    "l tag larger than body");
 		return;
 	}
@@ -1876,7 +1876,7 @@ dkim_body_verify(struct dkim_signature *sig)
 	}
 
 	if (digestsz != sig->bhsz || memcmp(digest, sig->bh, digestsz) != 0)
-		dkim_signature_state(sig, DKIM_FAIL, "bh mismatch");
+		ar_signature_state(sig, AR_FAIL, "bh mismatch");
 }
 
 const char *
@@ -2417,9 +2417,9 @@ auth_message_verify(struct message *msg)
 			continue;
 		if (msg->header[i].sig->query != NULL)
 			return;
-		if (msg->header[i].sig->state != DKIM_UNKNOWN)
+		if (msg->header[i].sig->state != AR_UNKNOWN)
 			continue;
-		dkim_signature_state(msg->header[i].sig, DKIM_PASS, NULL);
+		ar_signature_state(msg->header[i].sig, AR_PASS, NULL);
 	}
 
 	if (from == NULL || !strlen(from)) {
@@ -2439,7 +2439,7 @@ auth_message_verify(struct message *msg)
 void
 auth_ar_create(struct osmtpd_ctx *ctx)
 {
-	struct dkim_signature *sig;
+	struct ar_signature *sig;
 	size_t i;
 	ssize_t n, aroff = 0;
 	int found = 0;
@@ -2459,7 +2459,7 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 			continue;
 		found = 1;
 		if ((aroff = auth_ar_cat(&line, &linelen, aroff, "; dkim=%s",
-		    dkim_state2str(sig->state))) == -1) {
+		    ar_state2str(sig->state))) == -1) {
 			auth_err(msg->ctx, "malloc");
 			goto fail;
 		}
