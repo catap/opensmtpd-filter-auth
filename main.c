@@ -45,12 +45,15 @@
 
 /*
  * Use RFC8601 (Authentication-Results) codes instead of RFC6376 codes,
- * since they're more expressive.
+ * since they're more expressive with additional NONE and SOFTFAIL for
+ * RFC7208 (Sender Policy Framework (SPF)).
  */
 enum ar_state {
 	AR_UNKNOWN,
+	AR_NONE,
 	AR_PASS,
 	AR_FAIL,
+	AR_SOFTFAIL,
 	AR_POLICY,
 	AR_NEUTRAL,
 	AR_TEMPERROR,
@@ -106,28 +109,6 @@ struct ar_signature {
 };
 
 /*
- * Use RFC7601 (Authentication-Results), anyway OpenSMTPD reports only pass or fail
- */
-enum iprev_state {
-	IPREV_NONE,
-	IPREV_PASS,
-	IPREV_FAIL
-};
-
-/*
- * Base on RFC7208
- */
-enum spf_state {
-	SPF_NONE,
-	SPF_NEUTRAL,
-	SPF_PASS,
-	SPF_FAIL,
-	SPF_SOFTFAIL,
-	SPF_TEMPERROR,
-	SPF_PERMERROR
-};
-
-/*
  * RFC 5321 doesn't limit record size, enforce some resanable limit
  */
 #define SPF_RECORD_MAX 4096
@@ -136,7 +117,7 @@ struct spf_query {
 	struct spf_record *spf;
 	struct event_asr *eva;
 	int type;
-	enum spf_state q;
+	enum ar_state q;
 	int include;
 	int exists;
 	char *domain;
@@ -147,7 +128,7 @@ struct spf_query {
 struct spf_record {
 	void (*cb)(struct osmtpd_ctx *);
 	struct osmtpd_ctx *ctx;
-	enum spf_state state;
+	enum ar_state state;
 	const char *state_reason;
 	char *sender_local;
 	char *sender_domain;
@@ -186,7 +167,7 @@ struct message {
 
 struct session {
 	struct osmtpd_ctx *ctx;
-	enum iprev_state iprev;
+	enum ar_state iprev;
 	struct spf_record *spf_helo;
 	struct spf_record *spf_mailfrom;
 	struct sockaddr_storage src;
@@ -230,10 +211,9 @@ void ar_header_cat(struct osmtpd_ctx *, const char *);
 void ar_body_parse(struct message *, const char *);
 void ar_body_verify(struct ar_signature *);
 void ar_rr_resolve(struct asr_result *, void *);
-const char *iprev_state2str(enum iprev_state);
 void spf_lookup_record(struct spf_record *, const char *, int,
-	enum spf_state, int, int);
-void spf_done(struct spf_record *, enum spf_state, const char *);
+	enum ar_state, int, int);
+void spf_done(struct spf_record *, enum ar_state, const char *);
 void spf_resolve(struct asr_result *, void *);
 void spf_resolve_txt(struct dns_rr *, struct spf_query *);
 void spf_resolve_mx(struct dns_rr *, struct spf_query *);
@@ -244,7 +224,6 @@ char* spf_parse_txt(const char *, size_t);
 int spf_check_cidr(struct spf_record *, struct in_addr *, int );
 int spf_check_cidr6(struct spf_record *, struct in6_addr *, int );
 int spf_execute_txt(struct spf_query *);
-const char *spf_state2str(enum spf_state);
 int spf_ar_cat(const char *, struct spf_record *, char **, size_t *, ssize_t *);
 void auth_message_verify(struct message *);
 void auth_ar_create(struct osmtpd_ctx *);
@@ -311,9 +290,9 @@ auth_connect(struct osmtpd_ctx *ctx, const char *rdns, enum osmtpd_status fcrdns
 	struct session *ses = ctx->local_session;
 
 	if (fcrdns == OSMTPD_STATUS_OK)
-		ses->iprev = IPREV_PASS;
+		ses->iprev = AR_PASS;
 	else
-		ses->iprev = IPREV_FAIL;
+		ses->iprev = AR_FAIL;
 
 	memcpy(&ses->src, src, sizeof(struct sockaddr_storage));
 }
@@ -400,7 +379,7 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from,
 
 	spf->cb = cb;
 	spf->ctx = ctx;
-	spf->state = SPF_NONE;
+	spf->state = AR_NONE;
 	spf->state_reason = NULL;
 	spf->nqueries = 0;
 	spf->running = 0;
@@ -443,7 +422,7 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from,
 		osmtpd_err(1, "%s: malloc", __func__);
 
 	spf_lookup_record(
-		spf, spf->sender_domain, T_TXT, SPF_PASS, 0, 0);
+		spf, spf->sender_domain, T_TXT, AR_PASS, 0, 0);
 
 	return spf;
 
@@ -482,7 +461,7 @@ auth_session_new(struct osmtpd_ctx *ctx)
 		osmtpd_err(1, NULL);
 
 	ses->ctx = ctx;
-	ses->iprev = IPREV_NONE;
+	ses->iprev = AR_NONE;
 
 	ses->spf_helo = NULL;
 	ses->spf_mailfrom = NULL;
@@ -1324,6 +1303,7 @@ ar_signature_state(struct ar_signature *sig, enum ar_state state,
 		break;
 	case AR_PASS:
 	case AR_FAIL:
+	case AR_SOFTFAIL:
 		osmtpd_errx(1, "Unexpected transition");
 	case AR_POLICY:
 		if (state == AR_PASS)
@@ -1357,6 +1337,8 @@ ar_state2str(enum ar_state state)
 		return "pass";
 	case AR_FAIL:
 		return "fail";
+	case AR_SOFTFAIL:
+		return "softfail";
 	case AR_POLICY:
 		return "policy";
 	case AR_NEUTRAL:
@@ -1819,34 +1801,20 @@ ar_body_verify(struct ar_signature *sig)
 		ar_signature_state(sig, AR_FAIL, "bh mismatch");
 }
 
-const char *
-iprev_state2str(enum iprev_state state)
-{
-	switch (state)
-	{
-	case IPREV_NONE:
-		return "none";
-	case IPREV_PASS:
-		return "pass";
-	case IPREV_FAIL:
-		return "fail";
-	}
-}
-
 void
 spf_lookup_record(struct spf_record *spf, const char *domain, int type,
-	enum spf_state qualifier, int include, int exists)
+	enum ar_state qualifier, int include, int exists)
 {
 	struct asr_query *aq;
 	struct spf_query *query;
 
 	if (spf->nqueries >= SPF_DNS_LOOKUP_LIMIT) {
-		spf_done(spf, SPF_PERMERROR, "To many DNS queries");
+		spf_done(spf, AR_PERMERROR, "To many DNS queries");
 		return;
 	}
 
 	if (domain == NULL || !strlen(domain)) {
-		spf_done(spf, SPF_PERMERROR, "Empty domain");
+		spf_done(spf, AR_PERMERROR, "Empty domain");
 		return;
 	}
 
@@ -1863,13 +1831,13 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type,
 		osmtpd_err(1, "%s: malloc", __func__);
 
 	if ((aq = res_query_async(query->domain, C_IN, type, NULL)) == NULL) {
-		spf_done(spf, SPF_NEUTRAL, NULL);
+		spf_done(spf, AR_NEUTRAL, NULL);
 		osmtpd_warn(NULL, "res_query_async");
 		return;
 	}
 
 	if ((query->eva = event_asr_run(aq, spf_resolve, query)) == NULL) {
-		spf_done(spf, SPF_NEUTRAL, NULL);
+		spf_done(spf, AR_NEUTRAL, NULL);
 		osmtpd_warn(NULL, "event_asr_run");
 		asr_abort(aq);
 		return;
@@ -1896,14 +1864,14 @@ spf_resolve(struct asr_result *ar, void *arg)
 	query->spf->running--;
 
 	if (ar->ar_h_errno == NETDB_INTERNAL) {
-		spf_done(spf, SPF_NEUTRAL, NULL);
+		spf_done(spf, AR_NEUTRAL, NULL);
 		osmtpd_warn(NULL, "res_query_async");
 		return;
 	}
 
 	if (ar->ar_h_errno == TRY_AGAIN
 		|| ar->ar_h_errno == NO_RECOVERY) {
-		spf_done(query->spf, SPF_TEMPERROR, hstrerror(ar->ar_h_errno));
+		spf_done(query->spf, AR_TEMPERROR, hstrerror(ar->ar_h_errno));
 		goto end;
 	}
 
@@ -1912,7 +1880,7 @@ spf_resolve(struct asr_result *ar, void *arg)
 		|| ar->ar_h_errno == NO_ADDRESS) {
 		if (query->include && !query->exists)
 			spf_done(query->spf,
-				SPF_PERMERROR, hstrerror(ar->ar_h_errno));
+				AR_PERMERROR, hstrerror(ar->ar_h_errno));
 		goto consume;
 	}
 
@@ -1923,7 +1891,7 @@ spf_resolve(struct asr_result *ar, void *arg)
 				  "Mallformed SPF DNS response for domain %s: %s",
 				  print_dname(q.q_dname, buf, sizeof(buf)),
 				  pack.err);
-		spf_done(query->spf, SPF_TEMPERROR, pack.err);
+		spf_done(query->spf, AR_TEMPERROR, pack.err);
 		goto end;
 	}
 
@@ -1962,7 +1930,7 @@ spf_resolve(struct asr_result *ar, void *arg)
 			osmtpd_warn(spf->ctx,
 					  "Unexpected SPF DNS record: %d for domain %s",
 					  rr.rr_type, query->domain);
-			spf_done(query->spf, SPF_TEMPERROR, "Unexpected record");
+			spf_done(query->spf, AR_TEMPERROR, "Unexpected record");
 			break;
 		}
 
@@ -2003,7 +1971,7 @@ spf_resolve_txt(struct dns_rr *rr, struct spf_query *query)
 
 	if (query->txt != NULL) {
 		free(txt);
-		spf_done(query->spf, SPF_PERMERROR, "Duplicated SPF record");
+		spf_done(query->spf, AR_PERMERROR, "Duplicated SPF record");
 		return;
 	}
 
@@ -2159,7 +2127,7 @@ spf_execute_txt(struct spf_query *query)
 	char *end;
 	int bits;
 
-	enum spf_state q = query->q;
+	enum ar_state q = query->q;
 
 	while ((ap = strsep(&in, " ")) != NULL) {
 		if (strcasecmp(ap, "v=spf1") == 0)
@@ -2170,20 +2138,20 @@ spf_execute_txt(struct spf_query *query)
 			*end = '\0';
 
 		if (*ap == '+') {
-			q = SPF_PASS;
+			q = AR_PASS;
 			ap++;
 		} else if (*ap == '-') {
-			q = SPF_FAIL;
+			q = AR_FAIL;
 			ap++;
 		} else if (*ap == '~') {
-			q = SPF_SOFTFAIL;
+			q = AR_SOFTFAIL;
 			ap++;
 		} else if (*ap == '?') {
-			q = SPF_NEUTRAL;
+			q = AR_NEUTRAL;
 			ap++;
 		}
 
-		if (q != SPF_PASS && query->include)
+		if (q != AR_PASS && query->include)
 			continue;
 
 		if (strncasecmp("all", ap, 3) == 0) {
@@ -2261,7 +2229,7 @@ spf_execute_txt(struct spf_query *query)
 }
 
 void
-spf_done(struct spf_record *spf, enum spf_state state, const char *reason)
+spf_done(struct spf_record *spf, enum ar_state state, const char *reason)
 {
 	int i;
 
@@ -2282,28 +2250,6 @@ spf_done(struct spf_record *spf, enum spf_state state, const char *reason)
 	spf->done = 1;
 }
 
-const char *
-spf_state2str(enum spf_state state)
-{
-	switch (state)
-	{
-	case SPF_NONE:
-		return "none";
-	case SPF_NEUTRAL:
-		return "neutral";
-	case SPF_PASS:
-		return "pass";
-	case SPF_FAIL:
-		return "fail";
-	case SPF_SOFTFAIL:
-		return "softfail";
-	case SPF_TEMPERROR:
-		return "temperror";
-	case SPF_PERMERROR:
-		return "permerror";
-	}
-}
-
 int
 spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linelen, ssize_t *aroff)
 {
@@ -2312,7 +2258,7 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 
 	if ((*aroff =
 			auth_ar_cat(line, linelen, *aroff,
-				"; spf=%s", spf_state2str(spf->state))
+				"; spf=%s", ar_state2str(spf->state))
 			) == -1) {
 		return -1;
 	}
@@ -2433,7 +2379,7 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 	}
 
 	if ((aroff = auth_ar_cat(&line, &linelen, aroff,
-	    "; iprev=%s", iprev_state2str(ses->iprev))) == -1)
+	    "; iprev=%s", ar_state2str(ses->iprev))) == -1)
 		osmtpd_err(1, "%s: malloc", __func__);
 
 	if (spf_ar_cat("smtp.helo", ses->spf_helo,
