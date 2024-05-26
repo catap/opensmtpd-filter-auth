@@ -20,14 +20,65 @@
 .Os
 .Sh NAME
 .Nm filter-auth
-.Nd authenticate email via verification of dkim signature
+.Nd authenticate email and add Authentication-Results header
 .Sh SYNOPSIS
 .Nm
+.Op Fl A
+.Op Ar authserv-id
 .Sh DESCRIPTION
 .Nm
-verifies the dkim signatures of messages and adds an Authentication-Results
-header to the message.
+verifies the DKIM and ARC signatures of messages, the SPF policy and
+adds an Authentication-Results header to the message. If the
+.Fl A
+flag is specified, it adds the ARC-Authentication-Results header
+instead, with the next unused
+.Em i
+value in the chain. This filter gets used
+.Em authserv-id
+from OpenSMTPD which can be overridden by the
+.Ar authserv-id
+argument.
 .Sh SEE ALSO
 .Xr filter-admdscrub 8
 .Xr filter-dkimsign 8
 .Xr smtpd 8
+.Sh STANDARDS
+.\" RFC7208
+.\" RFC8601
+.Rs
+.%A J. Klensin
+.%D October 2008
+.%R RFC 5321
+.%T Simple Mail Transfer Protocol
+.Re
+.Pp
+.Rs
+.%A D. Crocker, Ed.
+.%Q Brandenburg InternetWorking
+.%A T. Hansen, Ed.
+.%Q AT&T Laboratories
+.%A M. Kucherawy, Ed.
+.%Q Cloudmark
+.%D September 2011
+.%R RFC 6376
+.%T DomainKeys Identified Mail (DKIM) Signatures
+.Re
+.Pp
+.Rs
+.%A S. Kitterman
+.%Q Kitterman Technical Services
+.%D April 2014
+.%R RFC 7208
+.%T Sender Policy Framework (SPF) for Authorizing Use of Domains in Email, Version 1
+.Re
+.Pp
+.Rs
+.%A M. Kucherawy
+.%D May 2019
+.%R RFC 8601
+.%T Message Header Field for Indicating Message Authentication Status
+.Re
+.Sh AUTHORS
+.An Kirill A. Korinsky Aq Mt kirill@korins.ky
+.An Martijn van Duren Aq Mt martijn@openbsd.org
+.An Gilles Chehade Aq Mt gilles@poolp.org
