@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2024 Kirill A. Korinsky <kirill@korins.ky>
  * Copyright (c) 2022 Martijn van Duren <martijn@openbsd.org>
+ * Copyright (c) 2019 Martijn van Duren <martijn@openbsd.org>
  * Copyright (c) 2017 Gilles Chehade <gilles@poolp.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -184,6 +185,8 @@ struct session {
 	struct spf_record *spf_helo;
 	struct spf_record *spf_mailfrom;
 	struct sockaddr_storage src;
+	char *identity;
+	char *rdns;
 };
 
 void usage(void);
@@ -230,6 +233,7 @@ void ar_header_cat(struct osmtpd_ctx *, const char *);
 void ar_body_parse(struct message *, const char *);
 void ar_body_verify(struct ar_signature *);
 void ar_rr_resolve(struct asr_result *, void *);
+char *spf_evaluate_domain(struct spf_record *, char *);
 void spf_lookup_record(struct spf_record *, char *, int,
 	enum ar_state, int, int);
 void spf_done(struct spf_record *, enum ar_state, const char *);
@@ -324,6 +328,13 @@ auth_connect(struct osmtpd_ctx *ctx, const char *rdns, enum osmtpd_status fcrdns
 		ses->iprev = AR_FAIL;
 
 	memcpy(&ses->src, src, sizeof(struct sockaddr_storage));
+
+	if (rdns != NULL) {
+		if ((ses->rdns = strdup(rdns)) == NULL) {
+			osmtpd_err(1, "malloc");
+			return;
+		}
+	}
 }
 
 void
@@ -333,7 +344,15 @@ spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 
 	struct session *ses = ctx->local_session;
 
-	if (identity == NULL || !strlen(identity))
+	if (identity == NULL)
+		return;
+
+	if ((ses->identity = strdup(identity)) == NULL) {
+		osmtpd_err(1, "malloc");
+		return;
+	}
+
+	if (strlen(identity) == 0)
 		return;
 
 	snprintf(from, sizeof(from), "postmaster@%s", identity);
@@ -519,6 +538,9 @@ auth_session_new(struct osmtpd_ctx *ctx)
 	ses->spf_helo = NULL;
 	ses->spf_mailfrom = NULL;
 
+	ses->identity = NULL;
+	ses->rdns = NULL;
+
 	return ses;
 }
 
@@ -531,6 +553,10 @@ auth_session_free(struct osmtpd_ctx *ctx, void *data)
 		spf_record_free(ses->spf_helo);
 	if (ses->spf_mailfrom)
 		spf_record_free(ses->spf_mailfrom);
+	if (ses->identity)
+		free(ses->identity);
+	if (ses->rdns)
+		free(ses->rdns);
 
 	free(ses);
 }
@@ -2042,6 +2068,266 @@ ar_body_verify(struct ar_signature *sig)
 		ar_signature_state(sig, AR_FAIL, "bh mismatch");
 }
 
+char *
+spf_evaluate_domain(struct spf_record *spf, char *domain)
+{
+	struct session *ses = spf->ctx->local_session;
+
+	char spec[HOST_NAME_MAX + 1];
+	char macro[HOST_NAME_MAX + 1], smacro[sizeof(macro)];
+	char delimiters[sizeof(".-+,/_=")];
+	char *addr, *endptr, *tmp;
+	size_t i, mlen;
+	long digits;
+	int reverse;
+
+	if (domain == NULL)
+		return NULL;
+
+	for (i = 0;
+		 domain[0] != ' ' && domain[0] != '\0' && i < sizeof(spec);
+		 domain++) {
+
+		if (domain[0] < 0x21 || domain[0] > 0x7e) {
+			spf_done(
+				spf, AR_PERMERROR, "Invalid character in domain-spec");
+			return NULL;
+		}
+
+		if (domain[0] != '%') {
+			spec[i++] = domain[0];
+			continue;
+		}
+		domain++;
+
+		switch (domain[0]) {
+			case '%':
+				spec[i++] = '%';
+				break;
+			case '_':
+				spec[i++] = ' ';
+				break;
+			case '-':
+				if (i + 3 >= sizeof(spec)) {
+					spf_done(
+						spf, AR_PERMERROR, "domain-spec too large");
+					return NULL;
+				}
+
+				spec[i++] = '%';
+				spec[i++] = '2';
+				spec[i++] = '0';
+				break;
+			case '{':
+				domain++;
+				digits = -1;
+				reverse = 0;
+				delimiters[0] = '\0';
+
+				switch (domain[0]) {
+					case 'S':
+					case 's':
+						mlen = (size_t) snprintf(macro, sizeof(macro),
+				    		"%s@%s", spf->sender_local,
+							spf->sender_domain);
+						break;
+					case 'L':
+					case 'l':
+						mlen = strlcpy(macro,
+							spf->sender_local, sizeof(macro));
+						break;
+					case 'O':
+					case 'o':
+						mlen = strlcpy(macro,
+				    		spf->sender_domain,
+				    		sizeof(macro));
+						break;
+					case 'D':
+					case 'd':
+						if (spf->nqueries < 1) {
+							spf_done(spf, AR_PERMERROR,
+									 "no domain for d macro");
+							return NULL;
+						}
+						mlen = strlcpy(macro,
+							spf->queries[spf->nqueries - 1].domain,
+							sizeof(macro));
+						break;
+					case 'I':
+					case 'i':
+						if (ses->src.ss_family == AF_INET) {
+							addr = (char *)(&((struct sockaddr_in *)
+					    		&(ses->src))->sin_addr);
+							mlen = snprintf(macro, sizeof(macro),
+					    		"%u.%u.%u.%u",
+								addr[0], addr[1], addr[2], addr[3]);
+						} else if (ses->src.ss_family == AF_INET6) {
+							addr = (char *)(&((struct sockaddr_in6 *)
+					    		&(ses->src))->sin6_addr);
+							mlen = snprintf(macro, sizeof(macro),
+								"%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
+								"%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
+								"%x.%x.%x.%x.%x.%x.%x.%x.%x.%x",
+								(addr[0] >> 4), (addr[0] & 0xf),
+								(addr[1] >> 4), (addr[1] & 0xf),
+								(addr[2] >> 4), (addr[2] & 0xf),
+								(addr[3] >> 4), (addr[3] & 0xf),
+								(addr[4] >> 4), (addr[4] & 0xf),
+								(addr[5] >> 4), (addr[5] & 0xf),
+								(addr[6] >> 4), (addr[6] & 0xf),
+								(addr[7] >> 4), (addr[7] & 0xf),
+								(addr[8] >> 4), (addr[8] & 0xf),
+								(addr[9] >> 4), (addr[9] & 0xf),
+								(addr[10] >> 4), (addr[10] & 0xf),
+								(addr[11] >> 4), (addr[11] & 0xf),
+								(addr[12] >> 4), (addr[12] & 0xf),
+								(addr[13] >> 4), (addr[13] & 0xf),
+								(addr[14] >> 4), (addr[14] & 0xf),
+								(addr[15] >> 4), (addr[15] & 0xf));
+						} else {
+							spf_done(spf, AR_PERMERROR,
+									 "unsupported type of address");
+							return NULL;
+						}
+						break;
+					case 'P':
+					case 'p':
+						mlen = strlcpy(macro, ses->rdns, sizeof(macro));
+						break;
+					case 'V':
+					case 'v':
+						if (ses->src.ss_family == AF_INET)
+							mlen = strlcpy(macro, "in-addr",
+								sizeof(macro));
+						else if (ses->src.ss_family == AF_INET6)
+							mlen = strlcpy(macro, "ip6",
+								 sizeof(macro));
+						else {
+							spf_done(spf, AR_PERMERROR,
+									 "unsupported type of address");
+							return NULL;
+						}
+						break;
+					case 'H':
+					case 'h':
+						mlen = strlcpy(macro, ses->identity,
+							sizeof(macro));
+						break;
+					default:
+						spf_done(spf, AR_PERMERROR,
+							"Unexpected macro in domain-spec");
+						return NULL;
+				}
+
+				if (mlen >= sizeof(macro)) {
+					spf_done(spf, AR_PERMERROR,
+				    	"Macro expansions too large");
+					return NULL;
+				}
+
+				domain++;
+				if (isdigit(domain[0])) {
+					digits = strtol(domain, &endptr, 10);
+					if (digits < 1) {
+						spf_done(spf, AR_PERMERROR,
+							"digits in macro can't be 0");
+						return NULL;
+					}
+					domain = endptr;
+				}
+
+				if (domain[0] == 'r') {
+					domain++;
+					reverse = 1;
+				}
+
+				for (; strchr(".-+,/_=", domain[0]) != NULL; domain++) {
+					if (strchr(delimiters, domain[0]) == NULL) {
+						delimiters[strlen(delimiters) + 1] = '\0';
+						delimiters[strlen(delimiters)] = domain[0];
+					}
+				}
+
+				if (delimiters[0] == '\0') {
+					delimiters[0] = '.';
+					delimiters[1] = '\0';
+				}
+
+				if (domain[0] != '}') {
+					spf_done(spf, AR_PERMERROR,
+						"Mallformed macro, expected end");
+					return NULL;
+				}
+
+				if (reverse) {
+					smacro[0] = '\0';
+					tmp = macro + strlen(macro) - 1;
+					/*
+					 * DIGIT rightmost elements after reversal is DIGIT
+					 * lefmost elements before reversal
+					 */
+					while (1) {
+						while (tmp > macro &&
+							   strchr(delimiters, tmp[0]) == NULL)
+							tmp--;
+						if (tmp == macro)
+							break;
+						if (digits == 0)
+							break;
+						if (digits > 0)
+							digits--;
+
+						tmp[0] = '\0';
+						if (smacro[0] != '\0')
+							strlcat(smacro, ".", sizeof(smacro));
+						strlcat(smacro, tmp + 1, sizeof(smacro));
+						tmp--;
+					}
+					if (digits != 0) {
+						if (smacro[0] != '\0')
+							strlcat(smacro, ".", sizeof(smacro));
+						strlcat(smacro, macro, sizeof(smacro));
+					}
+				} else {
+					if (digits != -1) {
+						tmp = macro;
+						endptr = macro + strlen(macro);
+						while (digits > 0) {
+							while (tmp < endptr &&
+								   strchr(delimiters, tmp[0]) == NULL)
+								tmp++;
+							if (tmp == endptr)
+								break;
+							if (digits == 1) {
+								tmp[0] = '\0';
+								break;
+							}
+							digits--;
+							tmp++;
+						}
+					}
+					strlcpy(smacro, macro, sizeof(smacro));
+				}
+
+				spec[i] = '\0';
+				i = strlcat(spec, smacro, sizeof(spec));
+				if (i >= sizeof(spec)) {
+					spf_done(
+						spf, AR_PERMERROR, "domain-spec too large");
+					return NULL;
+				}
+				break;
+
+			default:
+				spf_done(spf, AR_PERMERROR,
+					"Mallformed macro, unexpected character after %");
+				return NULL;
+		}
+	}
+
+	return strndup(spec, i);
+}
+
 void
 spf_lookup_record(struct spf_record *spf, char *domain, int type,
 	enum ar_state qualifier, int include, int exists)
@@ -2054,13 +2340,6 @@ spf_lookup_record(struct spf_record *spf, char *domain, int type,
 		return;
 	}
 
-	auth_domain_wihtout_last_dot(domain);
-
-	if (domain == NULL || domain[0] == '\0') {
-		spf_done(spf, AR_PERMERROR, "Empty domain");
-		return;
-	}
-
 	query = &spf->queries[spf->nqueries];
 	query->spf = spf;
 	query->type = type;
@@ -2070,9 +2349,16 @@ spf_lookup_record(struct spf_record *spf, char *domain, int type,
 	query->txt = NULL;
 	query->eva = NULL;
 
-	if ((query->domain = strdup(domain)) == NULL) {
+	if ((query->domain = spf_evaluate_domain(spf, domain)) == NULL) {
 		spf_done(spf, AR_NEUTRAL, NULL);
 		auth_err(spf->ctx, "malloc");
+		return;
+	}
+
+	auth_domain_wihtout_last_dot(query->domain);
+
+	if (query->domain == NULL || query->domain[0] == '\0') {
+		spf_done(spf, AR_PERMERROR, "Empty domain");
 		return;
 	}
 
