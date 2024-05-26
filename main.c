@@ -139,8 +139,10 @@ struct spf_record {
 	int running;
 	int done;
 /* RFC 7208 Section 4.6.4 limits to 10 DNS lookup,
- * and one is reserved for the first query.*/
-#define SPF_DNS_LOOKUP_LIMIT 11
+ * and one is reserved for the first query.
+ * But we compute A and AAAA as different lookups,
+ * so, I should use 20 as limit. */
+#define SPF_DNS_LOOKUP_LIMIT 21
 	struct spf_query queries[SPF_DNS_LOOKUP_LIMIT];
 };
 
