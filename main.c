@@ -2496,8 +2496,15 @@ spf_done(struct spf_record *spf, enum ar_state state, const char *reason)
 int
 spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linelen, ssize_t *aroff)
 {
-	if (spf == NULL)
+	if (spf == NULL) {
+		if ((*aroff =
+				auth_ar_cat(line, linelen, *aroff,
+					"; spf=none %s", type)
+			) == -1) {
+			return -1;
+		}
 		return 0;
+	}
 
 	if ((*aroff =
 			auth_ar_cat(line, linelen, *aroff,
@@ -2505,6 +2512,7 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 			) == -1) {
 		return -1;
 	}
+
 	if ((*aroff =
 			auth_ar_cat(line, linelen, *aroff,
 				" %s=%s@%s",
@@ -2514,8 +2522,8 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 			) == -1) {
 		return -1;
 	}
-	if (spf->state_reason != NULL)
-	{
+
+	if (spf->state_reason != NULL) {
 		if ((*aroff =
 				auth_ar_cat(line, linelen, *aroff,
 					" reason=\"%s\"", spf->state_reason)
