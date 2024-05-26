@@ -16,17 +16,17 @@
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
 .Dd $Mdocdate$
-.Dt FILTER-DKIMVERIFY 8
+.Dt FILTER-AUTH 8
 .Os
 .Sh NAME
 .Nm filter-auth
-.Nd authenticate email via verification of dkim signature
+.Nd authenticate email and add Authentication-Results header
 .Sh SYNOPSIS
 .Nm
 .Sh DESCRIPTION
 .Nm
-verifies the dkim signatures of messages and adds an Authentication-Results
-header to the message.
+verifies the DKIM and ARC signatures of messages, SPF policy and adds an
+Authentication-Results header to the message.
 .Sh SEE ALSO
 .Xr filter-admdscrub 8
 .Xr filter-dkimsign 8
