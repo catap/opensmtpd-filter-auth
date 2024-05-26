@@ -174,6 +174,7 @@ struct message {
 	size_t nheaders;
 	int readdone;
 	struct spf_record *spf_from;
+	int nqueries;
 };
 
 struct session {
@@ -526,6 +527,7 @@ auth_message_new(struct osmtpd_ctx *ctx)
 	msg->nheaders = 0;
 	msg->readdone = 0;
 	msg->spf_from = NULL;
+	msg->nqueries = 0;
 
 	return msg;
 }
@@ -837,6 +839,8 @@ ar_lookup_record(struct ar_signature *sig, const char *domain)
 
 	if ((sig->query = event_asr_run(query, ar_rr_resolve, sig)) == NULL)
 		osmtpd_err(1, "res_query_async");
+
+	sig->header->msg->nqueries++;
 }
 
 void
@@ -1502,6 +1506,7 @@ ar_rr_resolve(struct asr_result *ar, void *arg)
 	char buf[HOST_NAME_MAX + 1];
 
 	sig->query = NULL;
+	sig->header->msg->nqueries--;
 
 	if (sig->state != AR_UNKNOWN)
 		goto verify;
@@ -2431,7 +2436,7 @@ auth_message_verify(struct message *msg)
 	size_t i;
 	const char *from = NULL;
 
-	if (!msg->readdone)
+	if (!msg->readdone || msg->nqueries > 0)
 		return;
 
 	for (i = 0; i < msg->nheaders; i++) {
