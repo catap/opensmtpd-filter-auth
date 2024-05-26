@@ -240,6 +240,7 @@ int spf_execute_txt(struct spf_query *);
 int spf_ar_cat(const char *, struct spf_record *, char **, size_t *, ssize_t *);
 void auth_message_verify(struct message *);
 void auth_ar_create(struct osmtpd_ctx *);
+int ar_signature_ar_cat(const char *, struct ar_signature *, char **, size_t *, ssize_t *);
 ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
     __attribute__((__format__ (printf, 4, 5)));
 int auth_ar_print(struct osmtpd_ctx *, const char *);
@@ -2459,6 +2460,71 @@ auth_message_verify(struct message *msg)
 		auth_ar_create(msg->ctx);
 }
 
+int
+ar_signature_ar_cat(const char *type, struct ar_signature *sig, char **line, size_t *linelen, ssize_t *aroff)
+{
+	if ((*aroff =
+			auth_ar_cat(line, linelen, *aroff,
+				"; %s=%s", type, ar_state2str(sig->state))
+			) == -1)
+		return -1;
+
+	if (sig->state_reason != NULL) {
+		if ((*aroff =
+			 	auth_ar_cat(line, linelen, *aroff,
+			    	" reason=\"%s\"", sig->state_reason)
+				) == -1)
+			return -1;
+	}
+
+	if (sig->s[0] != '\0') {
+		if ((*aroff =
+			 	auth_ar_cat(line, linelen, *aroff,
+			    	" header.s=%s", sig->s)
+				) == -1)
+			return -1;
+	}
+
+	if (sig->d[0] != '\0') {
+		if ((*aroff =
+			 	auth_ar_cat(line, linelen, *aroff,
+			    	" header.d=%s", sig->d)
+				) == -1)
+			return -1;
+	}
+
+	/*
+	 * Don't print i-tag for DKIM, since localpart can be a
+	 * quoted-string, which can contain FWS and CFWS. But
+	 * ARC is different story and it should be printed out.
+	 */
+	if (sig->arc_i != 0) {
+		if ((*aroff =
+			 	auth_ar_cat(line, linelen, *aroff,
+			    	" header.i=%d", sig->arc_i)
+				) == -1)
+			return -1;
+	}
+
+	if (sig->a != NULL) {
+		if ((*aroff =
+			 	auth_ar_cat(line, linelen, *aroff,
+					" header.a=%.*s", (int)sig->asz, sig->a)
+				) == -1)
+			return -1;
+	}
+
+	if (sig->bheaderclean[0] != '\0') {
+		if ((*aroff =
+			 	auth_ar_cat(line, linelen, *aroff,
+					" header.b=%s", sig->bheaderclean)
+				) == -1)
+			return -1;
+	}
+
+	return 0;
+}
+
 void
 auth_ar_create(struct osmtpd_ctx *ctx)
 {
@@ -2474,6 +2540,7 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 	if ((aroff = auth_ar_cat(&line, &linelen, aroff,
 	    "Authentication-Results: %s", authservid)) == -1)
 		osmtpd_err(1, "%s: malloc", __func__);
+
 	for (i = 0; i < msg->nheaders; i++) {
 		sig = msg->header[i].sig;
 		if (sig == NULL)
@@ -2482,45 +2549,12 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 		if (sig->dkim)
 			found = 1;
 
-		if ((aroff = auth_ar_cat(&line, &linelen, aroff,
-			sig->dkim ? "; dkim=%s" : "; arc=%s",
-		    ar_state2str(sig->state))) == -1)
+		if (ar_signature_ar_cat(
+				sig->dkim ? "dkim" : "arc",
+				sig, &line, &linelen, &aroff) != 0)
 			osmtpd_err(1, "%s: malloc", __func__);
-		if (sig->state_reason != NULL) {
-			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
-			    " reason=\"%s\"", sig->state_reason)) == -1)
-				osmtpd_err(1, "%s: malloc", __func__);
-		}
-		if (sig->s[0] != '\0') {
-			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
-			    " header.s=%s", sig->s)) == -1)
-				osmtpd_err(1, "%s: malloc", __func__);
-		}
-		if (sig->d[0] != '\0') {
-			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
-			    " header.d=%s", sig->d)) == -1)
-				osmtpd_err(1, "%s: malloc", __func__);
-		}
-		/*
-		 * Don't print i-tag for DKIM, since localpart can be a
-		 * quoted-string, which can contain FWS and CFWS.
-		 */
-		if (sig->arc_i != 0) {
-			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
-			    " header.i=%d", sig->arc_i)) == -1)
-				osmtpd_err(1, "%s: malloc", __func__);
-		}
-		if (sig->a != NULL) {
-			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
-			    " header.a=%.*s", (int)sig->asz, sig->a)) == -1)
-				osmtpd_err(1, "%s: malloc", __func__);
-		}
-		if (sig->bheaderclean[0] != '\0') {
-			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
-			    " header.b=%s", sig->bheaderclean)) == -1)
-				osmtpd_err(1, "%s: malloc", __func__);
-		}
 	}
+
 	if (!found) {
 		aroff = auth_ar_cat(&line, &linelen, aroff, "; dkim=none");
 		if (aroff == -1)
