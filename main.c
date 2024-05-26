@@ -64,6 +64,8 @@ struct ar_signature {
 	struct header *header;
 	enum ar_state state;
 	const char *state_reason;
+	int dkim;
+	int seal;
 	int v;
 	const char *a;
 	size_t asz;
@@ -81,6 +83,7 @@ struct ar_signature {
 	size_t bhsz;
 	EVP_MD_CTX *bhctx;
 	int c;
+	enum ar_state cv;
 #define CANON_HEADER_SIMPLE	0
 #define CANON_HEADER_RELAXED	1
 #define CANON_HEADER		1
@@ -90,6 +93,7 @@ struct ar_signature {
 #define CANON_DONE		1 << 2
 	char d[HOST_NAME_MAX + 1];
 	char **h;
+	int arc_i;
 	const char *i;
 	size_t isz;
 	ssize_t l;
@@ -153,12 +157,19 @@ struct header {
 #define AUTHENTICATION_RESULTS_LINELEN 78
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
+
+/* RFC 8617 Section 4.2.1 */
+#define ARC_MIN_I 1
+#define ARC_MAX_I 50
+
 struct message {
 	struct osmtpd_ctx *ctx;
 	FILE *origf;
 	int parsing_headers;
 	size_t body_whitelines;
 	int has_body;
+	struct ar_signature *last_arc_seal;
+	struct ar_signature *last_arc_sign;
 	struct header *header;
 	size_t nheaders;
 	int readdone;
@@ -187,15 +198,17 @@ void auth_session_free(struct osmtpd_ctx *, void *);
 void *auth_message_new(struct osmtpd_ctx *);
 void auth_message_free(struct osmtpd_ctx *, void *);
 void ar_header_add(struct osmtpd_ctx *, const char *);
-void ar_signature_parse(struct header *);
+void ar_signature_parse(struct header *, int, int);
 void ar_signature_parse_v(struct ar_signature *, const char *, const char *);
 void ar_signature_parse_a(struct ar_signature *, const char *, const char *);
 void ar_signature_parse_b(struct ar_signature *, const char *, const char *);
 void ar_signature_parse_bh(struct ar_signature *, const char *, const char *);
 void ar_signature_parse_c(struct ar_signature *, const char *, const char *);
+void arc_signature_parse_cv(struct ar_signature *, const char *, const char *);
 void ar_signature_parse_d(struct ar_signature *, const char *, const char *);
 void ar_signature_parse_h(struct ar_signature *, const char *, const char *);
-void ar_signature_parse_i(struct ar_signature *, const char *, const char *);
+void dkim_signature_parse_i(struct ar_signature *, const char *, const char *);
+void arc_signature_parse_i(struct ar_signature *, const char *, const char *);
 void ar_signature_parse_l(struct ar_signature *, const char *, const char *);
 void ar_signature_parse_q(struct ar_signature *, const char *, const char *);
 void ar_signature_parse_s(struct ar_signature *, const char *, const char *);
@@ -232,6 +245,13 @@ ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 int auth_ar_print(struct osmtpd_ctx *, const char *);
 int ar_key_text_parse(struct ar_signature *, const char *);
 
+
+/* RFC8617 Section 5.1.1 */
+static char *arc_seal_headers[] = {
+	"ARC-Authentication-Results",
+	"ARC-Message-Signature",
+	"ARC-Seal"
+};
 
 char *authservid;
 EVP_ENCODE_CTX *ectx = NULL;
@@ -499,6 +519,8 @@ auth_message_new(struct osmtpd_ctx *ctx)
 	msg->parsing_headers = 1;
 	msg->body_whitelines = 0;
 	msg->has_body = 0;
+	msg->last_arc_seal = NULL;
+	msg->last_arc_sign = NULL;
 	msg->header = NULL;
 	msg->nheaders = 0;
 	msg->readdone = 0;
@@ -518,10 +540,12 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 		if (msg->header[i].sig != NULL) {
 			free(msg->header[i].sig->b);
 			EVP_MD_CTX_free(msg->header[i].sig->bhctx);
-			for (j = 0; msg->header[i].sig->h != NULL &&
-			    msg->header[i].sig->h[j] != NULL; j++)
-				free(msg->header[i].sig->h[j]);
-			free(msg->header[i].sig->h);
+			if (msg->header[i].sig->h != arc_seal_headers) {
+				for (j = 0; msg->header[i].sig->h != NULL &&
+			    	msg->header[i].sig->h[j] != NULL; j++)
+					free(msg->header[i].sig->h[j]);
+				free(msg->header[i].sig->h);
+			}
 			EVP_PKEY_free(msg->header[i].sig->p);
 			if (msg->header[i].sig->query)
 				event_asr_abort(msg->header[i].sig->query);
@@ -559,7 +583,20 @@ ar_header_add(struct osmtpd_ctx *ctx, const char *line)
 			    start, "DKIM-Signature", end - start) == 0 &&
 			    verify[0] == ':')
 				ar_signature_parse(
-				    &msg->header[msg->nheaders - 1]);
+				    &msg->header[msg->nheaders - 1], 1, 0);
+			else if (end != NULL &&
+			    strncasecmp(
+			    start, "ARC-Message-Signature", end - start) == 0 &&
+			    verify[0] == ':')
+				ar_signature_parse(
+				    &msg->header[msg->nheaders - 1], 0, 0);
+			else if (end != NULL &&
+			    strncasecmp(
+			    start, "ARC-Seal", end - start) == 0 &&
+			    verify[0] == ':')
+				ar_signature_parse(
+				    &msg->header[msg->nheaders - 1], 0, 1);
+
 			if (line[0] == '\0')
 				return;
 		} else {
@@ -604,9 +641,9 @@ ar_header_cat(struct osmtpd_ctx *ctx, const char *line)
 }
 
 void
-ar_signature_parse(struct header *header)
+ar_signature_parse(struct header *header, int dkim, int seal)
 {
-	struct ar_signature *sig;
+	struct ar_signature *sig, *last;
 	const char *buf, *i, *end;
 	char tagname[3];
 	char subdomain[HOST_NAME_MAX + 1];
@@ -620,6 +657,8 @@ ar_signature_parse(struct header *header)
 		osmtpd_err(1, "%s: malloc", __func__);
 	sig = header->sig;
 	sig->header = header;
+	sig->dkim = dkim;
+	sig->seal = seal;
 	sig->l = -1;
 	sig->t = -1;
 	sig->x = -1;
@@ -643,33 +682,37 @@ ar_signature_parse(struct header *header)
 		/* '=' */
 		buf = osmtpd_ltok_skip_fws(buf + 1, 1);
 		end = osmtpd_ltok_skip_tag_value(buf, 1);
-		if (strcmp(tagname, "v") == 0)
+		if (dkim && strcmp(tagname, "v") == 0)
 			ar_signature_parse_v(sig, buf, end);
 		else if (strcmp(tagname, "a") == 0)
 			ar_signature_parse_a(sig, buf, end);
 		else if (strcmp(tagname, "b") == 0)
 			ar_signature_parse_b(sig, buf, end);
-		else if (strcmp(tagname, "bh") == 0)
+		else if (!seal && strcmp(tagname, "bh") == 0)
 			ar_signature_parse_bh(sig, buf, end);
-		else if (strcmp(tagname, "c") == 0)
+		else if (!seal && strcmp(tagname, "c") == 0)
 			ar_signature_parse_c(sig, buf, end);
+		else if (seal && strcmp(tagname, "cv") == 0)
+			arc_signature_parse_cv(sig, buf, end);
 		else if (strcmp(tagname, "d") == 0)
 			ar_signature_parse_d(sig, buf, end);
-		else if (strcmp(tagname, "h") == 0)
+		else if (!seal && strcmp(tagname, "h") == 0)
 			ar_signature_parse_h(sig, buf, end);
-		else if (strcmp(tagname, "i") == 0)
-			ar_signature_parse_i(sig, buf, end);
-		else if (strcmp(tagname, "l") == 0)
+		else if (dkim && strcmp(tagname, "i") == 0)
+			dkim_signature_parse_i(sig, buf, end);
+		else if (!dkim && strcmp(tagname, "i") == 0)
+			arc_signature_parse_i(sig, buf, end);
+		else if (!seal && strcmp(tagname, "l") == 0)
 			ar_signature_parse_l(sig, buf, end);
-		else if (strcmp(tagname, "q") == 0)
+		else if (!seal && strcmp(tagname, "q") == 0)
 			ar_signature_parse_q(sig, buf, end);
 		else if (strcmp(tagname, "s") == 0)
 			ar_signature_parse_s(sig, buf, end);
 		else if (strcmp(tagname, "t") == 0)
 			ar_signature_parse_t(sig, buf, end);
-		else if (strcmp(tagname, "x") == 0)
+		else if (!seal && strcmp(tagname, "x") == 0)
 			ar_signature_parse_x(sig, buf, end);
-		else if (strcmp(tagname, "z") == 0)
+		else if (!seal && strcmp(tagname, "z") == 0)
 			ar_signature_parse_z(sig, buf, end);
 
 		buf = osmtpd_ltok_skip_fws(end, 1);
@@ -684,22 +727,31 @@ ar_signature_parse(struct header *header)
 	if (sig->state != AR_UNKNOWN)
 		return;
 
-	if (sig->v != 1)
+	if (dkim && sig->v != 1)
 		ar_signature_state(sig, AR_PERMERROR, "Missing v tag");
 	else if (sig->ah == NULL)
 		ar_signature_state(sig, AR_PERMERROR, "Missing a tag");
 	else if (sig->b == NULL)
 		ar_signature_state(sig, AR_PERMERROR, "Missing b tag");
-	else if (sig->bhsz == 0)
+	else if (!seal && sig->bhsz == 0)
 		ar_signature_state(sig, AR_PERMERROR, "Missing bh tag");
+	else if (seal && sig->cv == AR_UNKNOWN)
+		ar_signature_state(sig, AR_PERMERROR, "Missing cv tag");
 	else if (sig->d[0] == '\0')
 		ar_signature_state(sig, AR_PERMERROR, "Missing d tag");
-	else if (sig->h == NULL)
+	else if (!dkim && sig->arc_i == 0)
+		ar_signature_state(sig, AR_PERMERROR, "Missing i tag");
+	else if (!seal && sig->h == NULL)
 		ar_signature_state(sig, AR_PERMERROR, "Missing h tag");
 	else if (sig->s[0] == '\0')
 		ar_signature_state(sig, AR_PERMERROR, "Missing s tag");
 	if (sig->state != AR_UNKNOWN)
 		return;
+
+	if (seal) {
+		sig->c = CANON_HEADER_RELAXED;
+		sig->h = arc_seal_headers;
+	}
 
 	if (sig->i != NULL) {
 		i = osmtpd_ltok_skip_local_part(sig->i, 1) + 1;
@@ -721,6 +773,37 @@ ar_signature_parse(struct header *header)
 	if (sig->t != -1 && sig->x != -1 && sig->t > sig->x) {
 		ar_signature_state(sig, AR_PERMERROR, "t tag after x tag");
 		return;
+	}
+
+	if (!dkim) {
+		if (seal) {
+			last = header->msg->last_arc_seal;
+			header->msg->last_arc_seal = sig;
+		} else {
+			last = header->msg->last_arc_sign;
+			header->msg->last_arc_sign = sig;
+		}
+
+		if (last != NULL) {
+			if ((last->arc_i - 1) != sig->arc_i) {
+				ar_signature_state(
+					last, AR_PERMERROR, "Invalind i-chain");
+				return;
+			}
+
+			switch (last->cv) {
+				case AR_UNKNOWN:
+				case AR_FAIL:
+					break;
+				case AR_PASS:
+					if (sig->cv == AR_PASS)
+						break;
+				default:
+					ar_signature_state(
+						last, AR_PERMERROR, "Invalind cv-chain");
+					return;
+			}
+		}
 	}
 
 	if ((size_t)snprintf(subdomain, sizeof(subdomain), "%s._domainkey.%s",
@@ -949,6 +1032,26 @@ ar_signature_parse_c(struct ar_signature *sig, const char *start, const char *en
 }
 
 void
+arc_signature_parse_cv(struct ar_signature *sig, const char *start, const char *end)
+{
+	if (sig->cv != AR_UNKNOWN) {
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate cv tag");
+		return;
+	}
+
+	if (strncmp(start, "pass", 4) == 0) {
+		sig->cv = AR_PASS;
+	} else if (strncmp(start, "fail", 4) == 0) {
+		sig->cv = AR_FAIL;
+	} else if (strncmp(start, "none", 4) == 0) {
+		sig->cv = AR_NONE;
+	} else {
+		ar_signature_state(sig, AR_PERMERROR, "Invalid cv tag");
+		return;
+	}
+}
+
+void
 ar_signature_parse_d(struct ar_signature *sig, const char *start, const char *end)
 {
 	if (sig->d[0] != '\0') {
@@ -1016,7 +1119,7 @@ ar_signature_parse_h(struct ar_signature *sig, const char *start, const char *en
 }
 
 void
-ar_signature_parse_i(struct ar_signature *sig, const char *start, const char *end)
+dkim_signature_parse_i(struct ar_signature *sig, const char *start, const char *end)
 {
 	if (sig->i != NULL) {
 		ar_signature_state(sig, AR_PERMERROR, "Duplicate i tag");
@@ -1028,6 +1131,27 @@ ar_signature_parse_i(struct ar_signature *sig, const char *start, const char *en
 	}
 	sig->i = start;
 	sig->isz = (size_t)(end - start);
+}
+
+void
+arc_signature_parse_i(struct ar_signature *sig, const char *start, const char *end)
+{
+	char *ep;
+	long i;
+	if (sig->arc_i != 0) {
+		ar_signature_state(sig, AR_PERMERROR, "Duplicate i tag");
+		return;
+	}
+	if (osmtpd_ltok_skip_digit(start, 0) != end) {
+		ar_signature_state(sig, AR_PERMERROR, "Invalid i tag");
+		return;
+	}
+	i = strtol(start, &ep, 10);
+	if (i < ARC_MIN_I || i > ARC_MAX_I || ep != end) {
+		ar_signature_state(sig, AR_PERMERROR, "Invalid i tag");
+		return;
+	}
+	sig->arc_i = (int) i;
 }
 
 void
@@ -1167,6 +1291,13 @@ ar_signature_verify(struct ar_signature *sig)
 	if (sig->state != AR_UNKNOWN)
 		return;
 
+	if (sig->cv == AR_FAIL ||
+		(sig->cv == AR_PASS && sig->arc_i == 1) ||
+		(sig->cv == AR_NONE && sig->arc_i > 1)) {
+		ar_signature_state(sig, AR_FAIL, "cv tag");
+		return;
+	}
+
 	if (bctx == NULL) {
 		if ((bctx = EVP_MD_CTX_new()) == NULL)
 			osmtpd_err(1, "EVP_MD_CTX_new");
@@ -1188,23 +1319,26 @@ ar_signature_verify(struct ar_signature *sig)
 	for (i = 0; i < msg->nheaders; i++)
 		msg->header[i].parsed = 0;
 
-	for (header = 0; sig->h[header] != NULL; header++) {
-		for (i = msg->nheaders; i > 0; ) {
-			i--;
-			if (msg->header[i].parsed ||
-			    strncasecmp(msg->header[i].buf, sig->h[header],
-			    strlen(sig->h[header])) != 0 ||
-			    msg->header[i].sig == sig)
-				continue;
-			end = osmtpd_ltok_skip_fws(
-			    msg->header[i].buf + strlen(sig->h[header]), 1);
-			if (end[0] != ':')
-				continue;
-			ar_signature_header(bctx, sig, &(msg->header[i]));
-			msg->header[i].parsed = 1;
-			break;
+	if (sig->h != NULL) {
+		for (header = 0; sig->h[header] != NULL; header++) {
+			for (i = msg->nheaders; i > 0; ) {
+				i--;
+				if (msg->header[i].parsed ||
+					strncasecmp(msg->header[i].buf, sig->h[header],
+								strlen(sig->h[header])) != 0 ||
+					msg->header[i].sig == sig)
+					continue;
+				end = osmtpd_ltok_skip_fws(
+					msg->header[i].buf + strlen(sig->h[header]), 1);
+				if (end[0] != ':')
+					continue;
+				ar_signature_header(bctx, sig, &(msg->header[i]));
+				msg->header[i].parsed = 1;
+				break;
+			}
 		}
 	}
+
 	ar_signature_header(bctx, sig, sig->header);
 	if (!sig->sephash) {
 		if (EVP_DigestVerifyFinal(bctx, sig->b, sig->bsz) != 1)
@@ -1300,6 +1434,7 @@ ar_signature_state(struct ar_signature *sig, enum ar_state state,
 	}
 	switch (sig->state) {
 	case AR_UNKNOWN:
+	case AR_NONE:
 		break;
 	case AR_PASS:
 	case AR_FAIL:
@@ -1333,6 +1468,8 @@ ar_state2str(enum ar_state state)
 	{
 	case AR_UNKNOWN:
 		return "unknown";
+	case AR_NONE:
+		return "none";
 	case AR_PASS:
 		return "pass";
 	case AR_FAIL:
@@ -1780,6 +1917,9 @@ ar_body_verify(struct ar_signature *sig)
 	unsigned int digestsz;
 
 	if (sig->state != AR_UNKNOWN)
+		return;
+
+	if (sig->seal)
 		return;
 
 	if ((sig->c & CANON_BODY) == CANON_BODY_SIMPLE &&
@@ -2338,8 +2478,12 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 		sig = msg->header[i].sig;
 		if (sig == NULL)
 			continue;
-		found = 1;
-		if ((aroff = auth_ar_cat(&line, &linelen, aroff, "; dkim=%s",
+
+		if (sig->dkim)
+			found = 1;
+
+		if ((aroff = auth_ar_cat(&line, &linelen, aroff,
+			sig->dkim ? "; dkim=%s" : "; arc=%s",
 		    ar_state2str(sig->state))) == -1)
 			osmtpd_err(1, "%s: malloc", __func__);
 		if (sig->state_reason != NULL) {
@@ -2358,9 +2502,14 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 				osmtpd_err(1, "%s: malloc", __func__);
 		}
 		/*
-		 * Don't print i-tag, since localpart can be a quoted-string,
-		 * which can contain FWS and CFWS.
+		 * Don't print i-tag for DKIM, since localpart can be a
+		 * quoted-string, which can contain FWS and CFWS.
 		 */
+		if (sig->arc_i != 0) {
+			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
+			    " header.i=%d", sig->arc_i)) == -1)
+				osmtpd_err(1, "%s: malloc", __func__);
+		}
 		if (sig->a != NULL) {
 			if ((aroff = auth_ar_cat(&line, &linelen, aroff,
 			    " header.a=%.*s", (int)sig->asz, sig->a)) == -1)
@@ -2449,6 +2598,10 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 				    ncheckpoint, 0);
 				arid = 0;
 			/* methodspec */
+			} else if (strncmp(ncheckpoint, "arc",
+			    sizeof("arc") - 1) == 0) {
+				ncheckpoint = osmtpd_ltok_skip_keyword(
+				    ncheckpoint + sizeof("arc"), 0);
 			} else if (strncmp(ncheckpoint, "dkim",
 			    sizeof("dkim") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_keyword(
