@@ -168,13 +168,15 @@ struct message {
 	int parsing_headers;
 	size_t body_whitelines;
 	int has_body;
-	struct ar_signature *last_arc_seal;
-	struct ar_signature *last_arc_sign;
 	struct header *header;
 	size_t nheaders;
 	int readdone;
 	struct spf_record *spf_from;
 	int nqueries;
+	struct ar_signature *last_arc_seal;
+	struct ar_signature *last_arc_sign;
+	struct ar_signature **arc_seals;
+	struct ar_signature **arc_signs;
 };
 
 struct session {
@@ -521,13 +523,19 @@ auth_message_new(struct osmtpd_ctx *ctx)
 	msg->parsing_headers = 1;
 	msg->body_whitelines = 0;
 	msg->has_body = 0;
-	msg->last_arc_seal = NULL;
-	msg->last_arc_sign = NULL;
 	msg->header = NULL;
 	msg->nheaders = 0;
 	msg->readdone = 0;
 	msg->spf_from = NULL;
 	msg->nqueries = 0;
+	msg->last_arc_seal = NULL;
+	msg->last_arc_sign = NULL;
+	if ((msg->arc_seals =
+		 	calloc(ARC_MAX_I + 1, sizeof(*msg->arc_seals))) == NULL)
+		osmtpd_err(1, "%s: malloc", __func__);
+	if ((msg->arc_signs =
+		 	calloc(ARC_MAX_I + 1, sizeof(*msg->arc_signs))) == NULL)
+		osmtpd_err(1, "%s: malloc", __func__);
 
 	return msg;
 }
@@ -782,9 +790,13 @@ ar_signature_parse(struct header *header, int dkim, int seal)
 		if (seal) {
 			last = header->msg->last_arc_seal;
 			header->msg->last_arc_seal = sig;
+			if (header->msg->arc_seals[sig->arc_i] == NULL)
+				header->msg->arc_seals[sig->arc_i] = sig;
 		} else {
 			last = header->msg->last_arc_sign;
 			header->msg->last_arc_sign = sig;
+			if (header->msg->arc_signs[sig->arc_i] == NULL)
+				header->msg->arc_signs[sig->arc_i] = sig;
 		}
 
 		if (last != NULL) {
@@ -1364,6 +1376,25 @@ ar_signature_verify(struct ar_signature *sig)
 			break;
 		default:
 			osmtpd_err(1, "EVP_DigestVerify");
+		}
+	}
+
+	if (sig->arc_i > 0) {
+		if (msg->arc_seals[sig->arc_i] == NULL ||
+			msg->arc_signs[sig->arc_i] == NULL) {
+			ar_signature_state(sig, AR_PERMERROR, "missed ARC header");
+			return;
+		}
+
+		if (msg->arc_seals[sig->arc_i]->state == AR_UNKNOWN ||
+			msg->arc_signs[sig->arc_i]->state == AR_UNKNOWN)
+			return;
+
+		if (msg->arc_seals[sig->arc_i]->state !=
+				msg->arc_signs[sig->arc_i]->state) {
+			ar_signature_state(
+				msg->arc_signs[sig->arc_i], AR_FAIL, NULL);
+			return;
 		}
 	}
 }
@@ -2548,20 +2579,40 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 
 	for (i = 0; i < msg->nheaders; i++) {
 		sig = msg->header[i].sig;
-		if (sig == NULL)
+		if (sig == NULL || !sig->dkim)
 			continue;
 
-		if (sig->dkim)
-			found = 1;
+		found = 1;
 
 		if (ar_signature_ar_cat(
-				sig->dkim ? "dkim" : "arc",
-				sig, &line, &linelen, &aroff) != 0)
+				"dkim", sig, &line, &linelen, &aroff) != 0)
 			osmtpd_err(1, "%s: malloc", __func__);
 	}
 
 	if (!found) {
 		aroff = auth_ar_cat(&line, &linelen, aroff, "; dkim=none");
+		if (aroff == -1)
+			osmtpd_err(1, "%s: malloc", __func__);
+	}
+
+	found = 0;
+
+	for (i = ARC_MAX_I; i > 0; i--) {
+		sig = msg->arc_signs[i];
+		if (sig == NULL)
+			continue;
+
+		found = 1;
+
+		if (ar_signature_ar_cat(
+				"arc", sig, &line, &linelen, &aroff) != 0)
+			osmtpd_err(1, "%s: malloc", __func__);
+
+		break;
+	}
+
+	if (!found) {
+		aroff = auth_ar_cat(&line, &linelen, aroff, "; arc=none");
 		if (aroff == -1)
 			osmtpd_err(1, "%s: malloc", __func__);
 	}
