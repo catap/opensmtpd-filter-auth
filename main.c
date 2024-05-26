@@ -173,6 +173,7 @@ struct message {
 	int err;
 	int readdone;
 	struct spf_record *spf_from;
+	int nqueries;
 };
 
 struct session {
@@ -555,6 +556,7 @@ auth_message_new(struct osmtpd_ctx *ctx)
 	msg->err = 0;
 	msg->readdone = 0;
 	msg->spf_from = NULL;
+	msg->nqueries = 0;
 
 	return msg;
 }
@@ -868,6 +870,8 @@ ar_lookup_record(struct ar_signature *sig, char *domain)
 		asr_abort(query);
 		return;
 	}
+
+	sig->header->msg->nqueries++;
 }
 
 void
@@ -1550,6 +1554,7 @@ ar_rr_resolve(struct asr_result *ar, void *arg)
 	char buf[HOST_NAME_MAX + 1];
 
 	sig->query = NULL;
+	sig->header->msg->nqueries--;
 
 	if (ar->ar_h_errno == TRY_AGAIN || ar->ar_h_errno == NO_RECOVERY) {
 		ar_signature_state(sig, AR_TEMPERROR,
@@ -2493,7 +2498,7 @@ auth_message_verify(struct message *msg)
 	size_t i;
 	const char *from = NULL;
 
-	if (!msg->readdone)
+	if (!msg->readdone || msg->nqueries > 0)
 		return;
 
 	for (i = 0; i < msg->nheaders; i++) {
