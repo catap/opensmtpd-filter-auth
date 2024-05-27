@@ -2721,7 +2721,7 @@ spf_ar_cat(const char *type, struct spf_record *spf, char **line, size_t *linele
 	if (spf == NULL) {
 		if ((*aroff =
 				auth_ar_cat(line, linelen, *aroff,
-					"; spf=none %s", type)
+					"; spf=none %s=none", type)
 			) == -1) {
 			return -1;
 		}
