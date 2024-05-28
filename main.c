@@ -3003,12 +3003,12 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			/* reasonspec */
 			} else if (strncmp(ncheckpoint, "reason",
 			    sizeof("reason") - 1) == 0) {
-				ncheckpoint = osmtpd_ltok_skip_value(
-				    ncheckpoint + sizeof("reason"), 0);
+				ncheckpoint = osmtpd_ltok_skip_ar_reasonspec(
+					ncheckpoint, 0);
 			/* propspec */
 			} else {
 				ncheckpoint = osmtpd_ltok_skip_ar_propspec(
-						ncheckpoint, 0);
+					ncheckpoint, 0);
 			}
 
 			if (ncheckpoint == NULL)
