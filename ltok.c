@@ -1909,3 +1909,27 @@ osmtpd_ltok_skip_ar_propspec(const char *ptr, int optional)
 
 	return optional ? start : NULL;
 }
+
+const char *
+osmtpd_ltok_skip_ar_reasonspec(const char *ptr, int optional)
+{
+	const char *start = ptr;
+
+	if (strncmp(ptr, "reason", sizeof("reason") - 1) != 0)
+		return optional ? start : NULL;
+
+	ptr += sizeof("reason") - 1;
+
+	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
+
+	if (*ptr != '=')
+		return optional ? start : NULL;
+	ptr++;
+
+	ptr = osmtpd_ltok_skip_cfws(ptr, 1);
+
+	if ((ptr = osmtpd_ltok_skip_value(ptr, 0)) == NULL)
+		return optional ? start : NULL;
+
+	return ptr;
+}
