@@ -1698,13 +1698,13 @@ dkim_ar_print(struct osmtpd_ctx *ctx, const char *start)
 				    ncheckpoint, 0);
 				arid = 0;
 			/* methodspec */
-			} else if (strncmp(ncheckpoint, "dkim",
-			    sizeof("dkim") - 1) == 0) {
+			} else if (strncmp(ncheckpoint, "dkim=",
+			    sizeof("dkim=") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_keyword(
-				    ncheckpoint + sizeof("dkim"), 0);
+				    ncheckpoint + sizeof("dkim=") - 1, 0);
 			/* reasonspec */
-			} else if (strncmp(ncheckpoint, "reason",
-			    sizeof("reason") - 1) == 0) {
+			} else if (strncmp(ncheckpoint, "reason=",
+			    sizeof("reason=") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_ar_reasonspec(
 				    ncheckpoint, 0);
 			/* propspec */
