@@ -263,19 +263,36 @@ static char *arc_seal_headers[] = {
 	"ARC-Seal"
 };
 
-char *authservid;
+char *authservid = NULL;
+int arc = 0;
 EVP_ENCODE_CTX *ectx = NULL;
 
 int
 main(int argc, char *argv[])
 {
-	if (argc != 1)
-		osmtpd_errx(1, "Invalid argument count");
+	int ch;
 
 	OpenSSL_add_all_digests();
 
 	if (pledge("tmppath stdio dns", NULL) == -1)
 		osmtpd_err(1, "pledge");
+
+	while ((ch = getopt(argc, argv, "A")) != -1) {
+		switch (ch) {
+		case 'A':
+			arc = 1;
+			break;
+		default:
+			usage();
+		}
+	}
+
+	argc -= optind;
+	argv += optind;
+	if (argc > 1)
+		osmtpd_errx(1, "invalid authservid count");
+	if (argc == 1)
+		authservid = argv[0];
 
 	if ((ectx = EVP_ENCODE_CTX_new()) == NULL)
 		osmtpd_err(1, "EVP_ENCODE_CTX_new");
@@ -2869,9 +2886,23 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 	struct session *ses = ctx->local_session;
 	struct message *msg = ctx->local_message;
 
-	if ((aroff = auth_ar_cat(&line, &linelen, aroff,
+	if (!arc && (aroff = auth_ar_cat(&line, &linelen, aroff,
 	    "Authentication-Results: %s", authservid)) == -1)
 		osmtpd_err(1, "%s: malloc", __func__);
+
+	if (arc) {
+		for (i = ARC_MAX_I; i >= ARC_MIN_I; i--) {
+			if (msg->arc_signs[i] != NULL)
+				break;
+		}
+		i += 1;
+
+		if (i <= ARC_MAX_I && (aroff = auth_ar_cat(
+				&line, &linelen, aroff,
+				"ARC-Authentication-Results: i=%zu; %s",
+				i, authservid)) == -1)
+			osmtpd_err(1, "%s: malloc", __func__);
+	}
 
 	for (i = 0; i < msg->nheaders; i++) {
 		sig = msg->header[i].sig;
@@ -2978,8 +3009,13 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 		if (scan == ncheckpoint) {
 			checkpoint = ncheckpoint;
 			ncheckpoint = osmtpd_ltok_skip_cfws(ncheckpoint, 1);
+			/* ARC-AR starts with i= */
+			if (strncmp(ncheckpoint, "i=",
+			    sizeof("i=") - 1) == 0) {
+				ncheckpoint = osmtpd_ltok_skip_digit(
+				    ncheckpoint + sizeof("i=") - 1, 0);
 			/* authserv-id */
-			if (arid) {
+			} else if (arid) {
 				ncheckpoint = osmtpd_ltok_skip_value(
 				    ncheckpoint, 0);
 				arid = 0;
@@ -3054,6 +3090,6 @@ auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 __dead void
 usage(void)
 {
-	fprintf(stderr, "usage: filter-auth\n");
+	fprintf(stderr, "usage: filter-auth [-A] [authserv-id]\n");
 	exit(1);
 }
