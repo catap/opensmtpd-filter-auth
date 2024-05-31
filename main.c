@@ -3109,7 +3109,7 @@ auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 	va_start(ap, fmt);
 	size = vsnprintf(*ar + aroff, *n - aroff, fmt, ap);
 	va_end(ap);
-	if (size < 0)
+	if (size <= 0)
 		return -1;
 	if (size + aroff <= *n)
 		return (ssize_t)size + aroff;
@@ -3122,7 +3122,7 @@ auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 	va_start(ap, fmt);
 	size = vsnprintf(*ar + aroff, *n - aroff, fmt, ap);
 	va_end(ap);
-	if (size < 0)
+	if (size <= 0)
 		return -1;
 	return (ssize_t)size + aroff;
 }
