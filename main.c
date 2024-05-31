@@ -129,7 +129,6 @@ struct spf_query {
 };
 
 struct spf_record {
-	void (*cb)(struct osmtpd_ctx *);
 	struct osmtpd_ctx *ctx;
 	enum ar_state state;
 	const char *state_reason;
@@ -173,7 +172,6 @@ struct message {
 	size_t nheaders;
 	int err;
 	int readdone;
-	struct spf_record *spf_from;
 	int nqueries;
 	struct ar_signature *last_arc_seal;
 	struct ar_signature *last_arc_sign;
@@ -201,8 +199,7 @@ void spf_identity(struct osmtpd_ctx *, const char *);
 void spf_mailfrom(struct osmtpd_ctx *, const char *);
 void auth_dataline(struct osmtpd_ctx *, const char *);
 void auth_commit(struct osmtpd_ctx *);
-void *spf_record_new(struct osmtpd_ctx *, const char *,
-	void (*)(struct osmtpd_ctx *));
+void *spf_record_new(struct osmtpd_ctx *, const char *);
 void spf_record_free(struct spf_record *);
 void *auth_session_new(struct osmtpd_ctx *);
 void auth_session_free(struct osmtpd_ctx *, void *);
@@ -376,7 +373,7 @@ spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 
 	snprintf(from, sizeof(from), "postmaster@%s", identity);
 
-	ses->spf_helo = spf_record_new(ctx, from, osmtpd_filter_proceed);
+	ses->spf_helo = spf_record_new(ctx, from);
 }
 
 void
@@ -390,7 +387,7 @@ spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 	if (ses->spf_mailfrom)
 		spf_record_free(ses->spf_mailfrom);
 
-	ses->spf_mailfrom = spf_record_new(ctx, from, osmtpd_filter_proceed);
+	ses->spf_mailfrom = spf_record_new(ctx, from);
 }
 
 void
@@ -454,8 +451,7 @@ auth_commit(struct osmtpd_ctx *ctx)
 }
 
 void *
-spf_record_new(struct osmtpd_ctx *ctx, const char *from,
-	void (*cb)(struct osmtpd_ctx *))
+spf_record_new(struct osmtpd_ctx *ctx, const char *from)
 {
 	int i;
 	const char *at;
@@ -464,7 +460,6 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from,
 	if ((spf = malloc(sizeof(*spf))) == NULL)
 		osmtpd_err(1, NULL);
 
-	spf->cb = cb;
 	spf->ctx = ctx;
 	spf->state = AR_NONE;
 	spf->state_reason = NULL;
@@ -478,18 +473,6 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from,
 	}
 
 	from = osmtpd_ltok_skip_cfws(from, 1);
-	if (*from == '"')
-		from = osmtpd_ltok_skip_cfws(from + 1, 1);
-
-	if (strchr(from, '<') != NULL) {
-		from = osmtpd_ltok_skip_display_name(from, 1);
-		from = osmtpd_ltok_skip_cfws(from, 1);
-		if (*from == '"')
-			from = osmtpd_ltok_skip_cfws(from + 1, 1);
-	}
-
-	if (*from == '<')
-		from++;
 
 	if ((at = osmtpd_ltok_skip_local_part(from, 0)) == NULL)
 		goto fail;
@@ -600,7 +583,6 @@ auth_message_new(struct osmtpd_ctx *ctx)
 	msg->nheaders = 0;
 	msg->err = 0;
 	msg->readdone = 0;
-	msg->spf_from = NULL;
 	msg->nqueries = 0;
 	msg->last_arc_seal = NULL;
 	msg->last_arc_sign = NULL;
@@ -641,9 +623,6 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 		free(msg->header[i].sig);
 	}
 	free(msg->header);
-
-	if (msg->spf_from)
-		spf_record_free(msg->spf_from);
 
 	free(msg);
 }
@@ -2499,7 +2478,7 @@ consume:
 
 end:
 	if (spf->running == 0)
-		spf->cb(spf->ctx);
+		osmtpd_filter_proceed(spf->ctx);
 }
 
 void
@@ -2844,15 +2823,11 @@ void
 auth_message_verify(struct message *msg)
 {
 	size_t i;
-	const char *from = NULL;
 
 	if (!msg->readdone || msg->nqueries > 0)
 		return;
 
 	for (i = 0; i < msg->nheaders; i++) {
-		if (strncasecmp(msg->header[i].buf, "From:",
-				sizeof("From:") - 1) == 0)
-			from = msg->header[i].buf + sizeof("From:") - 1;
 		if (msg->header[i].sig == NULL)
 			continue;
 		if (msg->header[i].sig->query != NULL)
@@ -2862,18 +2837,7 @@ auth_message_verify(struct message *msg)
 		ar_signature_state(msg->header[i].sig, AR_PASS, NULL);
 	}
 
-	if (from == NULL || !strlen(from)) {
-		auth_ar_create(msg->ctx);
-		return;
-	}
-
-	if (msg->spf_from)
-		spf_record_free(msg->spf_from);
-
-	if ((msg->spf_from = spf_record_new(msg->ctx, from, auth_ar_create))
-			== NULL) {
-		auth_ar_create(msg->ctx);
-	}
+	auth_ar_create(msg->ctx);
 }
 
 int
@@ -3028,12 +2992,6 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 	}
 
 	if (spf_ar_cat("smtp.mailfrom", ses->spf_mailfrom,
-			&line, &linelen, &aroff) != 0) {
-		auth_err(msg->ctx, "malloc");
-		goto fail;
-	}
-
-	if (spf_ar_cat("header.from", msg->spf_from,
 			&line, &linelen, &aroff) != 0) {
 		auth_err(msg->ctx, "malloc");
 		goto fail;
