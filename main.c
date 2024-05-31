@@ -3111,7 +3111,7 @@ auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 	va_end(ap);
 	if (size <= 0)
 		return -1;
-	if (size + aroff <= *n)
+	if (size + aroff < *n)
 		return (ssize_t)size + aroff;
 	nn = (((aroff + size)  / 256) + 1) * 256;
 	artmp = realloc(*ar, nn);
