@@ -273,6 +273,7 @@ dkim_message_new(struct osmtpd_ctx *ctx)
 
 	if ((msg->origf = tmpfile()) == NULL) {
 		dkim_err(msg, "Can't open tempfile");
+		free(msg);
 		return NULL;
 	}
 	msg->ctx = ctx;
