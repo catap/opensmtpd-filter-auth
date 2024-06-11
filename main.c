@@ -572,6 +572,7 @@ auth_message_new(struct osmtpd_ctx *ctx)
 		osmtpd_err(1, NULL);
 
 	if ((msg->origf = tmpfile()) == NULL) {
+		auth_message_free(ctx, msg);
 		auth_err(ctx, "Can't open tempfile");
 		return NULL;
 	}
@@ -588,11 +589,13 @@ auth_message_new(struct osmtpd_ctx *ctx)
 	msg->last_arc_sign = NULL;
 	if ((msg->arc_seals =
 		 	calloc(ARC_MAX_I + 1, sizeof(*msg->arc_seals))) == NULL) {
+		auth_message_free(ctx, msg);
 		auth_err(msg->ctx, "malloc");
 		return NULL;
 	}
 	if ((msg->arc_signs =
 		 	calloc(ARC_MAX_I + 1, sizeof(*msg->arc_signs))) == NULL) {
+		auth_message_free(ctx, msg);
 		auth_err(msg->ctx, "malloc");
 		return NULL;
 	}
@@ -606,7 +609,8 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 	struct message *msg = data;
 	size_t i, j;
 
-	fclose(msg->origf);
+	if (msg->origf)
+		fclose(msg->origf);
 	for (i = 0; i < msg->nheaders; i++) {
 		if (msg->header[i].sig != NULL) {
 			free(msg->header[i].sig->b);
@@ -622,7 +626,8 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 		free(msg->header[i].buf);
 		free(msg->header[i].sig);
 	}
-	free(msg->header);
+	if (msg->header)
+		free(msg->header);
 
 	free(msg);
 }
