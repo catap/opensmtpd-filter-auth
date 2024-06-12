@@ -124,8 +124,6 @@ struct message {
 };
 
 void usage(void);
-void dkim_err(struct message *, char *);
-void dkim_errx(struct message *, char *);
 void dkim_conf(const char *, const char *);
 void dkim_dataline(struct osmtpd_ctx *, const char *);
 void dkim_commit(struct osmtpd_ctx *);
@@ -199,7 +197,7 @@ dkim_conf(const char *key, const char *value)
 	}
 	if (strcmp(key, "admd") == 0 && authservid == NULL) {
 		if ((authservid = strdup(value)) == NULL)
-			osmtpd_err(1, "malloc");
+			osmtpd_err(1, "%s: malloc", __func__);
 		end = osmtpd_ltok_skip_value(authservid, 0);
 		if (authservid + strlen(authservid) != end)
 			osmtpd_errx(1, "Invalid authservid");
@@ -220,10 +218,9 @@ dkim_dataline(struct osmtpd_ctx *ctx, const char *line)
 		return;
 	}
 
-	if (fprintf(msg->origf, "%s\n", line) < 0) {
-		dkim_err(msg, "Couldn't write to tempfile");
-		return;
-	}
+	if (fprintf(msg->origf, "%s\n", line) < 0)
+		osmtpd_err(1, "Couldn't write to tempfile");
+
 	if (line[0] == '.') {
 		line++;
 		if (line[0] == '\0') {
@@ -272,10 +269,10 @@ dkim_message_new(struct osmtpd_ctx *ctx)
 	struct message *msg;
 
 	if ((msg = malloc(sizeof(*msg))) == NULL)
-		osmtpd_err(1, NULL);
+		osmtpd_err(1, "%s: malloc", __func__);
 
 	if ((msg->origf = tmpfile()) == NULL) {
-		dkim_err(msg, "Can't open tempfile");
+		osmtpd_warn(NULL, "Can't open tempfile");
 		free(msg);
 		return NULL;
 	}
@@ -347,10 +344,8 @@ dkim_header_add(struct osmtpd_ctx *ctx, const char *line)
 	}
 	if (msg->nheaders % 10 == 0) {
 		if ((headers = recallocarray(msg->header, msg->nheaders,
-		    msg->nheaders + 10, sizeof(*msg->header))) == NULL) {
-			dkim_err(msg, "malloc");
-			return;
-		}
+		    msg->nheaders + 10, sizeof(*msg->header))) == NULL)
+			osmtpd_err(1, "%s: malloc", __func__);
 		msg->header = headers;
 		for (i = 0; i < msg->nheaders; i++) {
 			if (msg->header[i].sig == NULL)
@@ -374,10 +369,8 @@ dkim_header_cat(struct osmtpd_ctx *ctx, const char *line)
 
 	if (needed > (header->buflen / 1024) + 1) {
 		buf = reallocarray(header->buf, (needed / 1024) + 1, 1024);
-		if (buf == NULL) {
-			dkim_err(msg, "malloc");
-			return;
-		}
+		if (buf == NULL)
+			osmtpd_err(1, "%s: malloc", __func__);
 		header->buf = buf;
 	}
 	header->buflen += snprintf(header->buf + header->buflen,
@@ -399,10 +392,8 @@ dkim_signature_parse(struct header *header)
 	buf = osmtpd_ltok_skip_field_name(header->buf, 0);
 	buf = osmtpd_ltok_skip_wsp(buf, 1) + 1;
 
-	if ((header->sig = calloc(1, sizeof(*header->sig))) == NULL) {
-		dkim_err(header->msg, "malloc");
-		return;
-	}
+	if ((header->sig = calloc(1, sizeof(*header->sig))) == NULL)
+		osmtpd_err(1, "%s: malloc", __func__);
 	sig = header->sig;
 	sig->header = header;
 	sig->l = -1;
@@ -516,11 +507,11 @@ dkim_signature_parse(struct header *header)
 	}
 
 	if ((query = res_query_async(subdomain, C_IN, T_TXT, NULL)) == NULL) {
-		dkim_err(header->msg, "res_query_async");
+		osmtpd_warn(NULL, "res_query_async");
 		return;
 	}
 	if ((sig->query = event_asr_run(query, dkim_rr_resolve, sig)) == NULL) {
-		dkim_err(header->msg, "event_asr_run");
+		osmtpd_warn(NULL, "event_asr_run");
 		asr_abort(query);
 		return;
 	}
@@ -580,12 +571,11 @@ dkim_signature_parse_a(struct signature *sig, const char *start, const char *end
 		dkim_signature_state(sig, DKIM_NEUTRAL, "Unsuppored a tag h");
 		return;
 	}
-	if ((sig->bhctx = EVP_MD_CTX_new()) == NULL) {
-		dkim_err(sig->header->msg, "EVP_MD_CTX_new");
-		return;
-	}
+	if ((sig->bhctx = EVP_MD_CTX_new()) == NULL)
+		osmtpd_err(1, "EVP_MD_CTX_new");
+
 	if (EVP_DigestInit_ex(sig->bhctx, sig->ah, NULL) <= 0) {
-		dkim_err(sig->header->msg, "EVP_DigestInit_ex");
+		dkim_signature_state(sig, DKIM_FAIL, "Unsuppored a tag ah");
 		return;
 	}
 }
@@ -603,7 +593,7 @@ dkim_signature_parse_b(struct signature *sig, const char *start, const char *end
 	sig->bheader = start;
 	sig->bheadersz = end - start;
 	if ((sig->b = malloc(((sig->bheadersz / 4) + 1) * 3)) == NULL)
-		osmtpd_err(1, "malloc");
+		osmtpd_err(1, "%s: malloc", __func__);
 	/* EVP_DecodeBlock doesn't handle internal whitespace */
 	EVP_DecodeInit(ectx);
 	if (EVP_DecodeUpdate(ectx, sig->b, &decodesz, sig->bheader,
@@ -767,10 +757,8 @@ dkim_signature_parse_h(struct signature *sig, const char *start, const char *end
 			break;
 		h = osmtpd_ltok_skip_fws(h + 1, 1);
 	}
-	if ((sig->h = calloc(n + 1, sizeof(*sig->h))) == NULL) {
-		dkim_err(sig->header->msg, "malloc");
-		return;
-	}
+	if ((sig->h = calloc(n + 1, sizeof(*sig->h))) == NULL)
+		osmtpd_err(1, "%s: malloc", __func__);
 	n = 0;
 	h = start;
 	while (1) {
@@ -780,10 +768,8 @@ dkim_signature_parse_h(struct signature *sig, const char *start, const char *end
 			sig->h[n] = strndup(start, end - start);
 			break;
 		}
-		if ((sig->h[n++] = strndup(start, h - start)) == NULL) {
-			dkim_err(sig->header->msg, "malloc");
-			return;
-		}
+		if ((sig->h[n++] = strndup(start, h - start)) == NULL)
+			osmtpd_err(1, "%s: malloc", __func__);
 		start = osmtpd_ltok_skip_fws(h, 1);
 		if (start[0] != ':')
 			break;
@@ -944,21 +930,19 @@ dkim_signature_verify(struct signature *sig)
 		return;
 
 	if (bctx == NULL) {
-		if ((bctx = EVP_MD_CTX_new()) == NULL) {
-			dkim_errx(msg, "EVP_MD_CTX_new");
-			return;
-		}
+		if ((bctx = EVP_MD_CTX_new()) == NULL)
+			osmtpd_err(1, "EVP_MD_CTX_new");
 	}
 	EVP_MD_CTX_reset(bctx);
 	if (!sig->sephash) {
 		if (EVP_DigestVerifyInit(bctx, NULL, sig->ah, NULL,
-		    sig->p) != 1) {
-			dkim_errx(msg, "EVP_DigestVerifyInit");
+			sig->p) != 1) {
+			dkim_signature_state(sig, DKIM_FAIL, "ah tag");
 			return;
 		}
 	} else {
 		if (EVP_DigestInit_ex(bctx, sig->ah, NULL) != 1) {
-			dkim_errx(msg, "EVP_DigestInit_ex");
+			dkim_signature_state(sig, DKIM_FAIL, "ah tag");
 			return;
 		}
 	}
@@ -988,14 +972,12 @@ dkim_signature_verify(struct signature *sig)
 		if (EVP_DigestVerifyFinal(bctx, sig->b, sig->bsz) != 1)
 			dkim_signature_state(sig, DKIM_FAIL, "b mismatch");
 	} else {
-		if (EVP_DigestFinal_ex(bctx, digest, &digestsz) == 0) {
-			dkim_errx(msg, "EVP_DigestFinal_ex");
-			return;
-		}
-		if (EVP_DigestVerifyInit(bctx, NULL, NULL, NULL, sig->p) != 1) {
-			dkim_errx(msg, "EVP_DigestVerifyInit");
-			return;
-		}
+		if (EVP_DigestFinal_ex(bctx, digest, &digestsz) == 0)
+			osmtpd_err(1, "EVP_DigestFinal_ex");
+
+		if (EVP_DigestVerifyInit(bctx, NULL, NULL, NULL, sig->p) != 1)
+			osmtpd_err(1, "EVP_DigestVerifyInit");
+
 		switch (EVP_DigestVerify(bctx, sig->b, sig->bsz, digest,
 		    digestsz)) {
 		case 1:
@@ -1004,8 +986,7 @@ dkim_signature_verify(struct signature *sig)
 			dkim_signature_state(sig, DKIM_FAIL, "b mismatch");
 			break;
 		default:
-			dkim_errx(msg, "EVP_DigestVerify");
-			return;
+			osmtpd_err(1, "EVP_DigestVerify");
 		}
 	}
 }
@@ -1037,11 +1018,8 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 					ptr = osmtpd_ltok_skip_fws(
 					    ptr + 1, 1) - 1;
 			}
-			if (dkim_b_digest_update(bctx, &c, 1) == 0) {
-				dkim_errx(sig->header->msg,
-				    "dkim_b_digest_update");
-				return;
-			}
+			if (dkim_b_digest_update(bctx, &c, 1) == 0)
+				osmtpd_errx(1, "dkim_b_digest_update");
 			continue;
 		}
 		end = osmtpd_ltok_skip_fws(ptr, 1);
@@ -1051,37 +1029,26 @@ dkim_signature_header(EVP_MD_CTX *bctx, struct signature *sig,
 				    ptr, 0) - 1;
 				continue;
 			}
-			if (dkim_b_digest_update(bctx, ptr, 1) == 0) {
-				dkim_errx(sig->header->msg,
-				    "dkim_b_digest_update");
-				return;
-			}
+			if (dkim_b_digest_update(bctx, ptr, 1) == 0)
+				osmtpd_errx(1, "dkim_b_digest_update");
 		} else {
 			if (canon == CANON_HEADER_RELAXED) {
 				if (end[0] == '\0')
 					continue;
-				if (dkim_b_digest_update(bctx, " ", 1) == 0) {
-					dkim_errx(sig->header->msg,
-					    "dkim_b_digest_update");
-					return;
-				}
+				if (dkim_b_digest_update(bctx, " ", 1) == 0)
+					osmtpd_errx(1, "dkim_b_digest_update");
 			} else {
 				if (dkim_b_digest_update(bctx, ptr,
-				    end - ptr) == 0) {
-					dkim_errx(sig->header->msg,
-					    "dkim_b_digest_update");
-					return;
-				}
+				    end - ptr) == 0)
+					osmtpd_errx(1, "dkim_b_digest_update");
 			}
 			ptr = end - 1;
 		}
 			
 	}
 	if (sig->header != header) {
-		if (dkim_b_digest_update(bctx, "\r\n", 2) == 0) {
-			dkim_errx(sig->header->msg, "dkim_b_digest_update");
-			return;
-		}
+		if (dkim_b_digest_update(bctx, "\r\n", 2) == 0)
+			osmtpd_errx(1, "dkim_b_digest_update");
 	}
 }
 
@@ -1273,10 +1240,8 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 				    key, 0)) == NULL)
 					break;
 				hashname = strndup(key, tagvend - key);
-				if (hashname == NULL) {
-					dkim_err(sig->header->msg, "malloc");
-					return 0;
-				}
+				if (hashname == NULL)
+					osmtpd_err(1, "strndup");
 				if (EVP_get_digestbyname(hashname) == sig->ah) {
 					free(hashname);
 					h = 1;
@@ -1433,10 +1398,8 @@ dkim_key_text_parse(struct signature *sig, const char *key)
 		/* PEM_read_bio_PUBKEY will catch truncated keys */
 		pkoff += strlcpy(pkimp + pkoff, "-----END PUBLIC KEY-----\n",
 		    sizeof(pkimp) - pkoff);
-		if ((bio = BIO_new_mem_buf(pkimp, pkoff)) == NULL) {
-			dkim_err(sig->header->msg, "BIO_new_mem_buf");
-			return 1;
-		}
+		if ((bio = BIO_new_mem_buf(pkimp, pkoff)) == NULL)
+			osmtpd_err(1, "BIO_new_mem_buf");
 		sig->p = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
 		BIO_free(bio);
 		break;
@@ -1487,10 +1450,8 @@ dkim_body_parse(struct message *msg, const char *line)
 				continue;
 			hashn = sig->l == -1 ? 2 : MIN(2, sig->l);
 			sig->l -= sig->l == -1 ? 0 : hashn;
-			if (EVP_DigestUpdate(sig->bhctx, "\r\n", hashn) == 0) {
-				dkim_errx(msg, "EVP_DigestUpdate");
-				return;
-			}
+			if (EVP_DigestUpdate(sig->bhctx, "\r\n", hashn) == 0)
+				osmtpd_errx(1, "EVP_DigestUpdate");
 		}
 	}
 	msg->body_whitelines = 0;
@@ -1524,10 +1485,8 @@ dkim_body_parse(struct message *msg, const char *line)
 			hashn = sig->l == -1 ? len : MIN(len, (size_t)sig->l);
 			sig->l -= sig->l == -1 ? 0 : hashn;
 			ret = EVP_DigestUpdate(sig->bhctx, hash, hashn);
-			if (ret == 0) {
-				dkim_errx(msg, "EVP_DigestUpdate");
-				return;
-			}
+			if (ret == 0)
+				osmtpd_err(1, "EVP_DigestUpdate");
 		}
 		line = end;
 	}
@@ -1538,10 +1497,8 @@ dkim_body_parse(struct message *msg, const char *line)
 		hashn = sig->l == -1 ? 2 : MIN(2, sig->l);
 		sig->l -= sig->l == -1 ? 0 : hashn;
 		ret = EVP_DigestUpdate(sig->bhctx, "\r\n", hashn);
-		if (ret == 0) {
-			dkim_errx(msg, "EVP_DigestUpdate");
-			return;
-		}
+		if (ret == 0)
+			osmtpd_err(1, "EVP_DigestUpdate");
 	}
 }
 
@@ -1557,11 +1514,8 @@ dkim_body_verify(struct signature *sig)
 	if ((sig->c & CANON_BODY) == CANON_BODY_SIMPLE &&
 	    !sig->header->msg->has_body) {
 		if (EVP_DigestUpdate(sig->bhctx, "\r\n",
-		    sig->l == -1 ? 2 : MIN(2, sig->l)) <= 0) {
-			dkim_errx(sig->header->msg,
-			    "Can't update hash context");
-			return;
-		}
+		    sig->l == -1 ? 2 : MIN(2, sig->l)) <= 0)
+			osmtpd_errx(1, "EVP_DigestUpdate");
 	}
 	if (sig->l > 0) {
 		dkim_signature_state(sig, DKIM_PERMERROR,
@@ -1569,10 +1523,8 @@ dkim_body_verify(struct signature *sig)
 		return;
 	}
 
-	if (EVP_DigestFinal_ex(sig->bhctx, digest, &digestsz) == 0) {
-		dkim_errx(sig->header->msg, "EVP_DigestFinal_ex");
-		return;
-	}
+	if (EVP_DigestFinal_ex(sig->bhctx, digest, &digestsz) == 0)
+		osmtpd_err(1, "EVP_DigestFinal_ex");
 
 	if (digestsz != sig->bhsz || memcmp(digest, sig->bh, digestsz) != 0)
 		dkim_signature_state(sig, DKIM_FAIL, "bh mismatch");
@@ -1600,42 +1552,32 @@ dkim_message_verify(struct message *msg)
 			continue;
 		dkim_signature_state(msg->header[i].sig, DKIM_PASS, NULL);
 	}
-	
+
 	if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
-	    "Authentication-Results: %s", authservid)) == -1) {
-		dkim_err(msg, "malloc");
-		goto fail;
-	}
+	    "Authentication-Results: %s", authservid)) == -1)
+		osmtpd_err(1, "%s: malloc", __func__);
 	for (i = 0; i < msg->nheaders; i++) {
 		sig = msg->header[i].sig;
 		if (sig == NULL)
 			continue;
 		found = 1;
 		if ((aroff = dkim_ar_cat(&line, &linelen, aroff, "; dkim=%s",
-		    dkim_state2str(sig->state))) == -1) {
-			dkim_err(msg, "malloc");
-			goto fail;
-		}
+		    dkim_state2str(sig->state))) == -1)
+			osmtpd_err(1, "%s: malloc", __func__);
 		if (sig->state_reason != NULL) {
 			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
-			    " reason=\"%s\"", sig->state_reason)) == -1) {
-				dkim_err(msg, "malloc");
-				goto fail;
-			}
+			    " reason=\"%s\"", sig->state_reason)) == -1)
+				osmtpd_err(1, "%s: malloc", __func__);
 		}
 		if (sig->s[0] != '\0') {
 			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
-			    " header.s=%s", sig->s)) == -1) {
-				dkim_err(msg, "malloc");
-				goto fail;
-			}
+			    " header.s=%s", sig->s)) == -1)
+				osmtpd_err(1, "%s: malloc", __func__);
 		}
 		if (sig->d[0] != '\0') {
 			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
-			    " header.d=%s", sig->d)) == -1) {
-				dkim_err(msg, "malloc");
-				goto fail;
-			}
+			    " header.d=%s", sig->d)) == -1)
+				osmtpd_err(1, "%s: malloc", __func__);
 		}
 		/*
 		 * Don't print i-tag, since localpart can be a quoted-string,
@@ -1643,28 +1585,22 @@ dkim_message_verify(struct message *msg)
 		 */
 		if (sig->a != NULL) {
 			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
-			    " header.a=%.*s", (int)sig->asz, sig->a)) == -1) {
-				dkim_err(msg, "malloc");
-				goto fail;
-			}
+			    " header.a=%.*s", (int)sig->asz, sig->a)) == -1)
+				osmtpd_err(1, "%s: malloc", __func__);
 		}
 		if (sig->bheaderclean[0] != '\0') {
 			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
-			    " header.b=%s", sig->bheaderclean)) == -1) {
-				dkim_err(msg, "malloc");
-				goto fail;
-			}
+			    " header.b=%s", sig->bheaderclean)) == -1)
+				osmtpd_err(1, "%s: malloc", __func__);
 		}
 	}
 	if (!found) {
 		aroff = dkim_ar_cat(&line, &linelen, aroff, "; dkim=none");
-		if (aroff == -1) {
-			dkim_err(msg, "malloc");
-			goto fail;
-		}
+		if (aroff == -1)
+			osmtpd_err(1, "%s: malloc", __func__);
 	}
 	if (dkim_ar_print(msg->ctx, line) != 0) {
-		dkim_err(msg, "Mallformed AR header");
+		osmtpd_warnx(msg->ctx, "Mallformed AR header");
 		goto fail;
 	}
 
@@ -1674,7 +1610,7 @@ dkim_message_verify(struct message *msg)
 		osmtpd_filter_dataline(msg->ctx, "%s", line);
 	}
 	if (ferror(msg->origf))
-		dkim_err(msg, "getline");
+		osmtpd_err(1, "%s: ferror", __func__);
  fail:
 	free(line);
 	return;
@@ -1767,20 +1703,6 @@ dkim_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 	size = vsnprintf(*ar + aroff, *n - aroff, fmt, ap);
 	va_end(ap);
 	return (ssize_t)size + aroff;
-}
-
-void
-dkim_err(struct message *msg, char *text)
-{
-	msg->err = 1;
-	fprintf(stderr, "%s: %s\n", text, strerror(errno));
-}
-
-void
-dkim_errx(struct message *msg, char *text)
-{
-	msg->err = 1;
-	fprintf(stderr, "%s\n", text);
 }
 
 __dead void
