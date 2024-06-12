@@ -518,6 +518,8 @@ spf_record_free(struct spf_record *spf)
 			free(spf->queries[i].domain);
 		if(spf->queries[i].txt)
 			free(spf->queries[i].txt);
+		if(spf->queries[i].eva)
+			event_asr_abort(spf->queries[i].eva);
 	}
 
 	free(spf->sender_local);
@@ -622,6 +624,8 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 				free(msg->header[i].sig->h);
 			}
 			EVP_PKEY_free(msg->header[i].sig->p);
+			if (msg->header[i].sig->query)
+				event_asr_abort(msg->header[i].sig->query);
 		}
 		free(msg->header[i].buf);
 		free(msg->header[i].sig);
@@ -906,6 +910,10 @@ ar_lookup_record(struct ar_signature *sig, char *domain)
 
 	auth_domain_wihtout_last_dot(domain);
 
+	if (sig->query != NULL) {
+		event_asr_abort(sig->query);
+		sig->query = NULL;
+	}
 	if ((query = res_query_async(domain, C_IN, T_TXT, NULL)) == NULL) {
 		auth_err(sig->header->msg->ctx, "res_query_async");
 		return;
