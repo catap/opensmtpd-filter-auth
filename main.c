@@ -119,14 +119,12 @@ struct message {
 	int has_body;
 	struct header *header;
 	size_t nheaders;
-	int err;
 	int readdone;
 };
 
 void usage(void);
 void dkim_conf(const char *, const char *);
 void dkim_dataline(struct osmtpd_ctx *, const char *);
-void dkim_commit(struct osmtpd_ctx *);
 void *dkim_message_new(struct osmtpd_ctx *);
 void dkim_message_free(struct osmtpd_ctx *, void *);
 void dkim_header_add(struct osmtpd_ctx *, const char *);
@@ -178,7 +176,6 @@ main(int argc, char *argv[])
 
 	osmtpd_register_conf(dkim_conf);
 	osmtpd_register_filter_dataline(dkim_dataline);
-	osmtpd_register_filter_commit(dkim_commit);
 	osmtpd_local_message(dkim_message_new, dkim_message_free);
 	osmtpd_run();
 
@@ -209,14 +206,6 @@ dkim_dataline(struct osmtpd_ctx *ctx, const char *line)
 {
 	struct message *msg = ctx->local_message;
 	size_t i;
-
-	if (msg->err) {
-		if (line[0] == '.' && line[1] =='\0') {
-			msg->readdone = 1;
-			osmtpd_filter_dataline(ctx, ".");
-		}
-		return;
-	}
 
 	if (fprintf(msg->origf, "%s\n", line) < 0)
 		osmtpd_err(1, "Couldn't write to tempfile");
@@ -252,17 +241,6 @@ dkim_dataline(struct osmtpd_ctx *ctx, const char *line)
 	}
 }
 
-void
-dkim_commit(struct osmtpd_ctx *ctx)
-{
-	struct message *msg = ctx->local_message;
-
-	if (msg->err)
-		osmtpd_filter_disconnect(ctx, "Internal server error");
-	else
-		osmtpd_filter_proceed(ctx);
-}
-
 void *
 dkim_message_new(struct osmtpd_ctx *ctx)
 {
@@ -282,7 +260,6 @@ dkim_message_new(struct osmtpd_ctx *ctx)
 	msg->has_body = 0;
 	msg->header = NULL;
 	msg->nheaders = 0;
-	msg->err = 0;
 	msg->readdone = 0;
 
 	return msg;
