@@ -341,10 +341,8 @@ auth_connect(struct osmtpd_ctx *ctx, const char *rdns, enum osmtpd_status fcrdns
 	memcpy(&ses->src, src, sizeof(struct sockaddr_storage));
 
 	if (rdns != NULL) {
-		if ((ses->rdns = strdup(rdns)) == NULL) {
-			osmtpd_err(1, "malloc");
-			return;
-		}
+		if ((ses->rdns = strdup(rdns)) == NULL)
+			osmtpd_err(1, "%s: malloc", __func__);
 	}
 }
 
@@ -358,10 +356,8 @@ spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 	if (identity == NULL)
 		return;
 
-	if ((ses->identity = strdup(identity)) == NULL) {
-		osmtpd_err(1, "malloc");
-		return;
-	}
+	if ((ses->identity = strdup(identity)) == NULL)
+		osmtpd_err(1, "%s: strdup", __func__);
 
 	if (strlen(identity) == 0)
 		return;
@@ -433,7 +429,7 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from)
 	struct spf_record *spf;
 
 	if ((spf = malloc(sizeof(*spf))) == NULL)
-		osmtpd_err(1, NULL);
+		osmtpd_err(1, "%s: malloc", __func__);
 
 	spf->ctx = ctx;
 	spf->state = AR_NONE;
@@ -505,7 +501,7 @@ auth_session_new(struct osmtpd_ctx *ctx)
 	struct session *ses;
 
 	if ((ses = malloc(sizeof(*ses))) == NULL)
-		osmtpd_err(1, NULL);
+		osmtpd_err(1, "%s: malloc", __func__);
 
 	ses->ctx = ctx;
 	ses->iprev = AR_NONE;
@@ -2293,18 +2289,11 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type,
 		return;
 	}
 
-	if ((aq = res_query_async(query->domain, C_IN, type, NULL)) == NULL) {
-		spf_done(spf, AR_NEUTRAL, NULL);
-		osmtpd_warn(NULL, "res_query_async");
-		return;
-	}
+	if ((aq = res_query_async(query->domain, C_IN, type, NULL)) == NULL)
+		osmtpd_err(1, "res_query_async");
 
-	if ((query->eva = event_asr_run(aq, spf_resolve, query)) == NULL) {
-		spf_done(spf, AR_NEUTRAL, NULL);
-		osmtpd_warn(NULL, "event_asr_run");
-		asr_abort(aq);
-		return;
-	}
+	if ((query->eva = event_asr_run(aq, spf_resolve, query)) == NULL)
+		osmtpd_err(1, "event_asr_run");
 
 	spf->running++;
 	spf->nqueries++;
@@ -2325,12 +2314,6 @@ spf_resolve(struct asr_result *ar, void *arg)
 
 	query->eva = NULL;
 	query->spf->running--;
-
-	if (ar->ar_h_errno == NETDB_INTERNAL) {
-		spf_done(spf, AR_NEUTRAL, NULL);
-		osmtpd_warn(NULL, "res_query_async");
-		return;
-	}
 
 	if (ar->ar_h_errno == TRY_AGAIN
 		|| ar->ar_h_errno == NO_RECOVERY) {
@@ -2498,7 +2481,7 @@ spf_parse_txt(const char *rdata, size_t rdatalen)
 
 	odst = dst = malloc(dstsz);
 	if (dst == NULL)
-		return NULL;
+		osmtpd_err(1, "%s: malloc", __func__);
 
 	while (rdatalen) {
 		len = *(const unsigned char *)rdata;
