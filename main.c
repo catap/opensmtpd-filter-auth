@@ -285,6 +285,8 @@ dkim_message_free(struct osmtpd_ctx *ctx, void *data)
 				free(msg->header[i].sig->h[j]);
 			free(msg->header[i].sig->h);
 			EVP_PKEY_free(msg->header[i].sig->p);
+			if (msg->header[i].sig->query)
+				event_asr_abort(msg->header[i].sig->query);
 		}
 		free(msg->header[i].buf);
 		free(msg->header[i].sig);
@@ -496,6 +498,10 @@ dkim_lookup_record(struct signature *sig, const char *domain)
 
 	sig->nqueries++;
 
+	if (sig->query != NULL) {
+		event_asr_abort(sig->query);
+		sig->query = NULL;
+	}
 	if ((query = res_query_async(domain, C_IN, T_TXT, NULL)) == NULL)
 		osmtpd_err(1, "res_query_async");
 
