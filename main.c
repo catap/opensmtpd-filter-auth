@@ -592,6 +592,8 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 	}
 	free(msg->header);
 
+	free(msg->arc_seals);
+	free(msg->arc_signs);
 	free(msg);
 }
 
