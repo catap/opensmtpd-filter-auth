@@ -489,6 +489,8 @@ spf_record_free(struct spf_record *spf)
 			free(spf->queries[i].domain);
 		if(spf->queries[i].txt)
 			free(spf->queries[i].txt);
+		if(spf->queries[i].eva)
+			event_asr_abort(spf->queries[i].eva);
 	}
 
 	free(spf->sender_local);
