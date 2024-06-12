@@ -170,7 +170,6 @@ struct message {
 	int has_body;
 	struct header *header;
 	size_t nheaders;
-	int err;
 	int readdone;
 	int nqueries;
 	struct ar_signature *last_arc_seal;
@@ -196,7 +195,6 @@ void auth_connect(struct osmtpd_ctx *, const char *, enum osmtpd_status, struct 
 void spf_identity(struct osmtpd_ctx *, const char *);
 void spf_mailfrom(struct osmtpd_ctx *, const char *);
 void auth_dataline(struct osmtpd_ctx *, const char *);
-void auth_commit(struct osmtpd_ctx *);
 void *spf_record_new(struct osmtpd_ctx *, const char *);
 void spf_record_free(struct spf_record *);
 void *auth_session_new(struct osmtpd_ctx *);
@@ -299,7 +297,6 @@ main(int argc, char *argv[])
 	osmtpd_need(OSMTPD_NEED_SRC|OSMTPD_NEED_FCRDNS|OSMTPD_NEED_IDENTITY|OSMTPD_NEED_GREETING);
 	osmtpd_register_conf(auth_conf);
 	osmtpd_register_filter_dataline(auth_dataline);
-	osmtpd_register_filter_commit(auth_commit);
 	osmtpd_register_report_connect(1, auth_connect);
 	osmtpd_register_filter_helo(spf_identity);
 	osmtpd_register_filter_ehlo(spf_identity);
@@ -392,14 +389,6 @@ auth_dataline(struct osmtpd_ctx *ctx, const char *line)
 	struct message *msg = ctx->local_message;
 	size_t i;
 
-	if (msg->err) {
-		if (line[0] == '.' && line[1] =='\0') {
-			msg->readdone = 1;
-			osmtpd_filter_dataline(ctx, ".");
-		}
-		return;
-	}
-
 	if (fprintf(msg->origf, "%s\n", line) < 0)
 		osmtpd_err(1, "Couldn't write to tempfile");
 
@@ -432,17 +421,6 @@ auth_dataline(struct osmtpd_ctx *ctx, const char *line)
 	} else {
 		ar_body_parse(msg, line);
 	}
-}
-
-void
-auth_commit(struct osmtpd_ctx *ctx)
-{
-	struct message *msg = ctx->local_message;
-
-	if (msg->err)
-		osmtpd_filter_disconnect(ctx, "Internal server error");
-	else
-		osmtpd_filter_proceed(ctx);
 }
 
 void *
@@ -574,7 +552,6 @@ auth_message_new(struct osmtpd_ctx *ctx)
 	msg->has_body = 0;
 	msg->header = NULL;
 	msg->nheaders = 0;
-	msg->err = 0;
 	msg->readdone = 0;
 	msg->nqueries = 0;
 	msg->last_arc_seal = NULL;
