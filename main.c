@@ -441,6 +441,7 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from)
 	for (i = 0; i < SPF_DNS_LOOKUP_LIMIT; i++) {
 		spf->queries[i].domain = NULL;
 		spf->queries[i].txt = NULL;
+		spf->queries[i].eva = NULL;
 	}
 
 	from = osmtpd_ltok_skip_cfws(from, 1);
