@@ -576,8 +576,7 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 	struct message *msg = data;
 	size_t i, j;
 
-	if (msg->origf)
-		fclose(msg->origf);
+	fclose(msg->origf);
 	for (i = 0; i < msg->nheaders; i++) {
 		if (msg->header[i].sig != NULL) {
 			free(msg->header[i].sig->b);
@@ -598,6 +597,8 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 	if (msg->header)
 		free(msg->header);
 
+	free(msg->arc_seals);
+	free(msg->arc_signs);
 	free(msg);
 }
 
