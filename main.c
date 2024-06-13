@@ -1497,10 +1497,13 @@ ar_signature_state(struct ar_signature *sig, enum ar_state state,
 	case AR_UNKNOWN:
 	case AR_NONE:
 		break;
-	case AR_PASS:
 	case AR_FAIL:
+		if (state == AR_PERMERROR)
+			break;
+	case AR_PASS:
 	case AR_SOFTFAIL:
-		osmtpd_errx(1, "Unexpected transition");
+		osmtpd_errx(1, "Unexpected transition: %s -> %",
+			ar_state2str(sig->state), ar_state2str(state));
 	case AR_POLICY:
 		if (state == AR_PASS)
 			return;
@@ -1510,7 +1513,8 @@ ar_signature_state(struct ar_signature *sig, enum ar_state state,
 			return;
 		if (state == AR_TEMPERROR || state == AR_PERMERROR)
 			break;
-		osmtpd_errx(1, "Unexpected transition");
+		osmtpd_errx(1, "Unexpected transition: %s -> %",
+			ar_state2str(sig->state), ar_state2str(state));
 	case AR_TEMPERROR:
 		if (state == AR_PERMERROR)
 			break;
