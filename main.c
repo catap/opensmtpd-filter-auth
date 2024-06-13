@@ -247,7 +247,7 @@ void auth_message_verify(struct message *);
 void auth_ar_create(struct osmtpd_ctx *);
 int ar_signature_ar_cat(const char *, struct ar_signature *, char **, size_t *, ssize_t *);
 ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
-    __attribute__((__format__ (printf, 4, 5)));
+	__attribute__((__format__ (printf, 4, 5)));
 int auth_ar_print(struct osmtpd_ctx *, const char *);
 int ar_key_text_parse(struct ar_signature *, const char *);
 void auth_domain_wihtout_last_dot(char *);
@@ -414,7 +414,7 @@ auth_dataline(struct osmtpd_ctx *ctx, const char *line)
 					continue;
 				if (msg->header[i].sig->query == NULL)
 					ar_signature_verify(
-					    msg->header[i].sig);
+						msg->header[i].sig);
 			}
 		}
 		return;
@@ -583,7 +583,7 @@ auth_message_free(struct osmtpd_ctx *ctx, void *data)
 			EVP_MD_CTX_free(msg->header[i].sig->bhctx);
 			if (msg->header[i].sig->h != arc_seal_headers) {
 				for (j = 0; msg->header[i].sig->h != NULL &&
-			    	msg->header[i].sig->h[j] != NULL; j++)
+					msg->header[i].sig->h[j] != NULL; j++)
 					free(msg->header[i].sig->h[j]);
 				free(msg->header[i].sig->h);
 			}
@@ -611,7 +611,7 @@ ar_header_add(struct osmtpd_ctx *ctx, const char *line)
 	size_t i;
 
 	if (msg->nheaders > 0 &&
-	    msg->header[msg->nheaders - 1].readdone == 0) {
+		msg->header[msg->nheaders - 1].readdone == 0) {
 		if (line[0] != ' ' && line[0] != '\t') {
 			msg->header[msg->nheaders - 1].readdone = 1;
 			start = msg->header[msg->nheaders - 1].buf;
@@ -620,23 +620,23 @@ ar_header_add(struct osmtpd_ctx *ctx, const char *line)
 			if (end != NULL)
 				verify = osmtpd_ltok_skip_wsp(end, 1);
 			if (end != NULL &&
-			    strncasecmp(
-			    start, "DKIM-Signature", end - start) == 0 &&
-			    verify[0] == ':')
+				strncasecmp(
+				start, "DKIM-Signature", end - start) == 0 &&
+				verify[0] == ':')
 				ar_signature_parse(
-				    &msg->header[msg->nheaders - 1], 1, 0);
+					&msg->header[msg->nheaders - 1], 1, 0);
 			else if (end != NULL &&
-			    strncasecmp(
-			    start, "ARC-Message-Signature", end - start) == 0 &&
-			    verify[0] == ':')
+				strncasecmp(
+				start, "ARC-Message-Signature", end - start) == 0 &&
+				verify[0] == ':')
 				ar_signature_parse(
-				    &msg->header[msg->nheaders - 1], 0, 0);
+					&msg->header[msg->nheaders - 1], 0, 0);
 			else if (end != NULL &&
-			    strncasecmp(
-			    start, "ARC-Seal", end - start) == 0 &&
-			    verify[0] == ':')
+				strncasecmp(
+				start, "ARC-Seal", end - start) == 0 &&
+				verify[0] == ':')
 				ar_signature_parse(
-				    &msg->header[msg->nheaders - 1], 0, 1);
+					&msg->header[msg->nheaders - 1], 0, 1);
 
 			if (line[0] == '\0')
 				return;
@@ -647,7 +647,7 @@ ar_header_add(struct osmtpd_ctx *ctx, const char *line)
 	}
 	if (msg->nheaders % 10 == 0) {
 		if ((headers = recallocarray(msg->header, msg->nheaders,
-		    msg->nheaders + 10, sizeof(*msg->header))) == NULL)
+			msg->nheaders + 10, sizeof(*msg->header))) == NULL)
 			osmtpd_err(1, "malloc");
 		msg->header = headers;
 		for (i = 0; i < msg->nheaders; i++) {
@@ -677,8 +677,8 @@ ar_header_cat(struct osmtpd_ctx *ctx, const char *line)
 		header->buf = buf;
 	}
 	header->buflen += snprintf(header->buf + header->buflen,
-	    (((needed / 1024) + 1) * 1024) - header->buflen, "%s%s",
-	    header->buflen == 0 ? "" : "\r\n", line);
+		(((needed / 1024) + 1) * 1024) - header->buflen, "%s%s",
+		header->buflen == 0 ? "" : "\r\n", line);
 }
 
 void
@@ -761,7 +761,7 @@ ar_signature_parse(struct header *header, int dkim, int seal)
 			buf++;
 		else if (buf[0] != '\0') {
 			ar_signature_state(sig, AR_PERMERROR,
-			    "Invalid tag-list");
+				"Invalid tag-list");
 			return;
 		}
 	}
@@ -800,14 +800,14 @@ ar_signature_parse(struct header *header, int dkim, int seal)
 		dlen = strlen(sig->d);
 		if (ilen < dlen) {
 			ar_signature_state(sig, AR_PERMERROR,
-			    "i tag not subdomain of d");
+				"i tag not subdomain of d");
 			return;
 		}
 		i += ilen - dlen;
 		if ((i[-1] != '.' && i[-1] != '@') ||
-		    strncasecmp(i, sig->d, dlen) != 0) {
+			strncasecmp(i, sig->d, dlen) != 0) {
 			ar_signature_state(sig, AR_PERMERROR,
-			    "i tag not subdomain of d");
+				"i tag not subdomain of d");
 			return;
 		}
 	}
@@ -852,9 +852,9 @@ ar_signature_parse(struct header *header, int dkim, int seal)
 	}
 
 	if ((size_t)snprintf(subdomain, sizeof(subdomain), "%s._domainkey.%s",
-	    sig->s, sig->d) >= sizeof(subdomain)) {
+		sig->s, sig->d) >= sizeof(subdomain)) {
 		ar_signature_state(sig, AR_PERMERROR,
-		    "dns/txt query too long");
+			"dns/txt query too long");
 		return;
 	}
 
@@ -958,13 +958,13 @@ ar_signature_parse_b(struct ar_signature *sig, const char *start, const char *en
 	/* EVP_DecodeBlock doesn't handle internal whitespace */
 	EVP_DecodeInit(ectx);
 	if (EVP_DecodeUpdate(ectx, sig->b, &decodesz, start,
-	    (int)(end - start)) == -1) {
+		(int)(end - start)) == -1) {
 		ar_signature_state(sig, AR_PERMERROR, "Invalid b tag");
 		return;
 	}
 	sig->bsz = decodesz;
 	if (EVP_DecodeFinal(ectx, sig->b + sig->bsz,
-	    &decodesz) == -1) {
+		&decodesz) == -1) {
 		ar_signature_state(sig, AR_PERMERROR, "Invalid b tag");
 		return;
 	}
@@ -1011,7 +1011,7 @@ ar_signature_parse_bh(struct ar_signature *sig, const char *start, const char *e
 	/* EVP_DecodeBlock doesn't handle internal whitespace */
 	EVP_DecodeInit(ectx);
 	if (EVP_DecodeUpdate(ectx, sig->bh, &decodesz, start,
-	    (int)(end - start)) == -1) {
+		(int)(end - start)) == -1) {
 		/* Paranoia check */
 		ar_signature_state(sig, AR_PERMERROR, "Invalid bh tag");
 		return;
@@ -1052,7 +1052,7 @@ ar_signature_parse_c(struct ar_signature *sig, const char *start, const char *en
 			start += 7;
 		} else {
 			ar_signature_state(sig, AR_PERMERROR,
-			    "Invalid c tag");
+				"Invalid c tag");
 			return;
 		}
 	}
@@ -1092,7 +1092,7 @@ ar_signature_parse_d(struct ar_signature *sig, const char *start, const char *en
 		return;
 	}
 	if (osmtpd_ltok_skip_sig_d_tag_value(start, 0) != end ||
-	    (size_t)(end - start) >= sizeof(sig->d)) {
+		(size_t)(end - start) >= sizeof(sig->d)) {
 		ar_signature_state(sig, AR_PERMERROR, "Invalid d tag");
 		return;
 	}
@@ -1117,7 +1117,7 @@ ar_signature_parse_h(struct ar_signature *sig, const char *start, const char *en
 	while (1) {
 		if ((h = osmtpd_ltok_skip_hdr_name(h, 0)) == NULL) {
 			ar_signature_state(sig, AR_PERMERROR,
-			    "Invalid h tag");
+				"Invalid h tag");
 			return;
 		}
 		n++;
@@ -1201,7 +1201,7 @@ ar_signature_parse_l(struct ar_signature *sig, const char *start, const char *en
 	l = strtoll(start, &lend, 10);
 	/* > 76 digits in stroll is an overflow */
 	if (osmtpd_ltok_skip_digit(start, 0) == NULL ||
-	    lend != end || errno != 0) {
+		lend != end || errno != 0) {
 		ar_signature_state(sig, AR_PERMERROR, "Invalid l tag");
 		return;
 	}
@@ -1272,7 +1272,7 @@ ar_signature_parse_t(struct ar_signature *sig, const char *start, const char *en
 	errno = 0;
 	sig->t = strtoll(start, &tend, 10);
 	if (osmtpd_ltok_skip_digit(start, 0) == NULL || tend != end ||
-	    tend - start > 12 || errno != 0) {
+		tend - start > 12 || errno != 0) {
 		ar_signature_state(sig, AR_PERMERROR, "Invalid t tag");
 		return;
 	}
@@ -1290,7 +1290,7 @@ ar_signature_parse_x(struct ar_signature *sig, const char *start, const char *en
 	errno = 0;
 	sig->x = strtoll(start, &xend, 10);
 	if (osmtpd_ltok_skip_digit(start, 0) == NULL || xend != end ||
-	    xend - start > 12 || errno != 0) {
+		xend - start > 12 || errno != 0) {
 		ar_signature_state(sig, AR_PERMERROR, "Invalid x tag");
 		return;
 	}
@@ -1338,7 +1338,7 @@ ar_signature_verify(struct ar_signature *sig)
 	EVP_MD_CTX_reset(bctx);
 	if (!sig->sephash) {
 		if (EVP_DigestVerifyInit(bctx, NULL, sig->ah, NULL,
-		    sig->p) != 1)
+			sig->p) != 1)
 			osmtpd_err(1, "EVP_DigestVerifyInit");
 	} else {
 		if (EVP_DigestInit_ex(bctx, sig->ah, NULL) != 1)
@@ -1380,7 +1380,7 @@ ar_signature_verify(struct ar_signature *sig)
 			osmtpd_err(1, "EVP_DigestVerifyInit");
 
 		switch (EVP_DigestVerify(bctx, sig->b, sig->bsz, digest,
-		    digestsz)) {
+			digestsz)) {
 		case 1:
 			break;
 		case 0:
@@ -1414,11 +1414,11 @@ ar_signature_verify(struct ar_signature *sig)
 /* EVP_DigestVerifyUpdate is a macro, so we can't alias this on a variable */
 #define ar_b_digest_update(a, b, c)					\
 	(sig->sephash ? EVP_DigestUpdate((a), (b), (c)) :\
-	    EVP_DigestVerifyUpdate((a), (b), (c)))
+		EVP_DigestVerifyUpdate((a), (b), (c)))
 
 void
 ar_signature_header(EVP_MD_CTX *bctx, struct ar_signature *sig,
-    struct header *header)
+	struct header *header)
 {
 	char c;
 	const char *ptr = header->buf, *end;
@@ -1436,7 +1436,7 @@ ar_signature_header(EVP_MD_CTX *bctx, struct ar_signature *sig,
 				inhdrname = 0;
 				if (canon == CANON_HEADER_RELAXED)
 					ptr = osmtpd_ltok_skip_fws(
-					    ptr + 1, 1) - 1;
+						ptr + 1, 1) - 1;
 			}
 			if (ar_b_digest_update(bctx, &c, 1) == 0)
 				osmtpd_errx(1, "ar_b_digest_update");
@@ -1446,7 +1446,7 @@ ar_signature_header(EVP_MD_CTX *bctx, struct ar_signature *sig,
 		if (end == ptr) {
 			if (sig->header == header && ptr == sig->bheader) {
 				ptr = osmtpd_ltok_skip_tag_value(
-				    ptr, 0) - 1;
+					ptr, 0) - 1;
 				continue;
 			}
 			if (ar_b_digest_update(bctx, ptr, 1) == 0)
@@ -1459,7 +1459,7 @@ ar_signature_header(EVP_MD_CTX *bctx, struct ar_signature *sig,
 					osmtpd_errx(1, "ar_b_digest_update");
 			} else {
 				if (ar_b_digest_update(bctx, ptr,
-				    end - ptr) == 0)
+					end - ptr) == 0)
 					osmtpd_errx(1, "ar_b_digest_update");
 			}
 			ptr = end - 1;
@@ -1474,7 +1474,7 @@ ar_signature_header(EVP_MD_CTX *bctx, struct ar_signature *sig,
 
 void
 ar_signature_state(struct ar_signature *sig, enum ar_state state,
-    const char *reason)
+	const char *reason)
 {
 	if (sig->query != NULL) {
 		event_asr_abort(sig->query);
@@ -1557,18 +1557,18 @@ ar_rr_resolve(struct asr_result *ar, void *arg)
 
 	if (ar->ar_h_errno == TRY_AGAIN || ar->ar_h_errno == NO_RECOVERY) {
 		ar_signature_state(sig, AR_TEMPERROR,
-		    hstrerror(ar->ar_h_errno));
+			hstrerror(ar->ar_h_errno));
 		goto verify;
 	}
 	if (ar->ar_h_errno != NETDB_SUCCESS) {
 		ar_signature_state(sig, AR_PERMERROR,
-		    hstrerror(ar->ar_h_errno));
+			hstrerror(ar->ar_h_errno));
 		goto verify;
 	}
 
 	unpack_init(&pack, ar->ar_data, ar->ar_datalen);
 	if (unpack_header(&pack, &h) != 0 ||
-	    unpack_query(&pack, &q) != 0) {
+		unpack_query(&pack, &q) != 0) {
 		auth_warn(sig->header->msg->ctx,
 				  "Mallformed DKIM DNS response for domain %s: %s",
 				  print_dname(q.q_dname, buf, sizeof(buf)),
@@ -1608,7 +1608,7 @@ ar_rr_resolve(struct asr_result *ar, void *arg)
 		while (rr.rr.other.rdlen > 0) {
 			cstrlen = ((const unsigned char *)rr_txt)[0];
 			if (cstrlen >= rr.rr.other.rdlen ||
-			    keylen + cstrlen >= sizeof(key))
+				keylen + cstrlen >= sizeof(key))
 				break;
 			/*
 			 * RFC 6376 Section 3.6.2.2
@@ -1629,7 +1629,7 @@ ar_rr_resolve(struct asr_result *ar, void *arg)
 
 	if (h.ancount == 0) {
 		ar_signature_state(sig, AR_PERMERROR,
-		    "No matching key found");
+			"No matching key found");
 	} else {
 		/* Only verify if all headers have been read */
 		if (!sig->header->msg->parsing_headers)
@@ -1683,7 +1683,7 @@ ar_key_text_parse(struct ar_signature *sig, const char *key)
 			 * record.
 			 */
 			if (!first ||
-			    osmtpd_ltok_skip_key_v_tag_value(key, 0) != end)
+				osmtpd_ltok_skip_key_v_tag_value(key, 0) != end)
 				return 0;
 			key = end;
 			break;
@@ -1695,7 +1695,7 @@ ar_key_text_parse(struct ar_signature *sig, const char *key)
 				return 0;
 			while (1) {
 				if ((tagvend = osmtpd_ltok_skip_key_h_tag_alg(
-				    key, 0)) == NULL)
+					key, 0)) == NULL)
 					break;
 				hashname = strndup(key, tagvend - key);
 				if (hashname == NULL)
@@ -1747,7 +1747,7 @@ ar_key_text_parse(struct ar_signature *sig, const char *key)
 			while (1) {
 				key = osmtpd_ltok_skip_fws(key, 1);
 				if (osmtpd_ltok_skip_alphadigitps(
-				    key, 0) == NULL)
+					key, 0) == NULL)
 					break;
 				pkraw[pkrawlen++] = key++[0];
 				if (pkrawlen >= sizeof(pkraw))
@@ -1777,11 +1777,11 @@ ar_key_text_parse(struct ar_signature *sig, const char *key)
 				return 0;
 			while (1) {
 				if ((tagvend =
-				    osmtpd_ltok_skip_key_s_tag_type(
-				    key, 0)) == NULL)
+					osmtpd_ltok_skip_key_s_tag_type(
+					key, 0)) == NULL)
 					break;
 				if (strncmp(key, "*", tagvend - key) == 0 ||
-				    strncmp(key, "email", tagvend - key) == 0) {
+					strncmp(key, "email", tagvend - key) == 0) {
 					s = 1;
 					break;
 				}
@@ -1802,7 +1802,7 @@ ar_key_text_parse(struct ar_signature *sig, const char *key)
 				return 0;
 			while (1) {
 				tagvend = osmtpd_ltok_skip_key_t_tag_flag(
-				    key, 0);
+					key, 0);
 				if (strncmp(key, "y", tagvend - key) == 0)
 					sig->kt |= KT_Y;
 				else if (strncmp(key, "s", tagvend - key) == 0)
@@ -1839,7 +1839,7 @@ ar_key_text_parse(struct ar_signature *sig, const char *key)
 	switch (sig->ak) {
 	case EVP_PKEY_RSA:
 		pkoff = strlcpy(pkimp, "-----BEGIN PUBLIC KEY-----\n",
-		    sizeof(pkimp));
+			sizeof(pkimp));
 		linelen = 0;
 		for (key = pkraw; key[0] != '\0';) {
 			if (pkoff + 2 >= sizeof(pkimp))
@@ -1855,7 +1855,7 @@ ar_key_text_parse(struct ar_signature *sig, const char *key)
 			pkimp[pkoff++] = '\n';
 		/* PEM_read_bio_PUBKEY will catch truncated keys */
 		pkoff += strlcpy(pkimp + pkoff, "-----END PUBLIC KEY-----\n",
-		    sizeof(pkimp) - pkoff);
+			sizeof(pkimp) - pkoff);
 		if ((bio = BIO_new_mem_buf(pkimp, pkoff)) == NULL)
 			osmtpd_err(1, "BIO_new_mem_buf");
 		sig->p = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
@@ -1873,7 +1873,7 @@ ar_key_text_parse(struct ar_signature *sig, const char *key)
 			return 0;
 		pklen += tmp;
 		sig->p = EVP_PKEY_new_raw_public_key(sig->ak, NULL, pkimp,
-		    pklen);
+			pklen);
 		break;
 #endif
 	}
@@ -1904,7 +1904,7 @@ ar_body_parse(struct message *msg, const char *line)
 	while (msg->body_whitelines-- > 0) {
 		for (i = 0; i < msg->nheaders; i++) {
 			if ((sig = msg->header[i].sig) == NULL ||
-			    sig->state != AR_UNKNOWN)
+				sig->state != AR_UNKNOWN)
 				continue;
 			hashn = sig->l == -1 ? 2 : MIN(2, sig->l);
 			sig->l -= sig->l == -1 ? 0 : hashn;
@@ -1925,7 +1925,7 @@ ar_body_parse(struct message *msg, const char *line)
 		wsp = end != line;
 		if (!wsp) {
 			while (osmtpd_ltok_skip_wsp(end, 0) == NULL &&
-			    end[0] != '\0')
+				end[0] != '\0')
 				end++;
 		}
 		for (i = 0; i < msg->nheaders; i++) {
@@ -1933,7 +1933,7 @@ ar_body_parse(struct message *msg, const char *line)
 			if (sig == NULL || sig->state != AR_UNKNOWN)
 				continue;
 			if (wsp &&
-			    (sig->c & CANON_BODY) == CANON_BODY_RELAXED) {
+				(sig->c & CANON_BODY) == CANON_BODY_RELAXED) {
 				hash = " ";
 				len = end[0] == '\0' ? 0 : 1;
 			} else {
@@ -1973,14 +1973,14 @@ ar_body_verify(struct ar_signature *sig)
 		return;
 
 	if ((sig->c & CANON_BODY) == CANON_BODY_SIMPLE &&
-	    !sig->header->msg->has_body) {
+		!sig->header->msg->has_body) {
 		if (EVP_DigestUpdate(sig->bhctx, "\r\n",
-		    sig->l == -1 ? 2 : MIN(2, sig->l)) <= 0)
+			sig->l == -1 ? 2 : MIN(2, sig->l)) <= 0)
 			osmtpd_errx(1, "EVP_DigestUpdate");
 	}
 	if (sig->l > 0) {
 		ar_signature_state(sig, AR_PERMERROR,
-		    "l tag larger than body");
+			"l tag larger than body");
 		return;
 	}
 
@@ -2051,7 +2051,7 @@ spf_evaluate_domain(struct spf_record *spf, char *domain)
 					case 'S':
 					case 's':
 						mlen = (size_t) snprintf(macro, sizeof(macro),
-				    		"%s@%s", spf->sender_local,
+							"%s@%s", spf->sender_local,
 							spf->sender_domain);
 						break;
 					case 'L':
@@ -2062,8 +2062,8 @@ spf_evaluate_domain(struct spf_record *spf, char *domain)
 					case 'O':
 					case 'o':
 						mlen = strlcpy(macro,
-				    		spf->sender_domain,
-				    		sizeof(macro));
+							spf->sender_domain,
+							sizeof(macro));
 						break;
 					case 'D':
 					case 'd':
@@ -2080,13 +2080,13 @@ spf_evaluate_domain(struct spf_record *spf, char *domain)
 					case 'i':
 						if (ses->src.ss_family == AF_INET) {
 							addr = (char *)(&((struct sockaddr_in *)
-					    		&(ses->src))->sin_addr);
+								&(ses->src))->sin_addr);
 							mlen = snprintf(macro, sizeof(macro),
-					    		"%u.%u.%u.%u",
+								"%u.%u.%u.%u",
 								addr[0], addr[1], addr[2], addr[3]);
 						} else if (ses->src.ss_family == AF_INET6) {
 							addr = (char *)(&((struct sockaddr_in6 *)
-					    		&(ses->src))->sin6_addr);
+								&(ses->src))->sin6_addr);
 							mlen = snprintf(macro, sizeof(macro),
 								"%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
 								"%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
@@ -2144,7 +2144,7 @@ spf_evaluate_domain(struct spf_record *spf, char *domain)
 
 				if (mlen >= sizeof(macro)) {
 					spf_done(spf, AR_PERMERROR,
-				    	"Macro expansions too large");
+						"Macro expansions too large");
 					return NULL;
 				}
 
@@ -2328,7 +2328,7 @@ spf_resolve(struct asr_result *ar, void *arg)
 
 	unpack_init(&pack, ar->ar_data, ar->ar_datalen);
 	if (unpack_header(&pack, &h) != 0 ||
-	    unpack_query(&pack, &q) != 0) {
+		unpack_query(&pack, &q) != 0) {
 		auth_warn(query->spf->ctx,
 				  "Mallformed SPF DNS response for domain %s: %s",
 				  print_dname(q.q_dname, buf, sizeof(buf)),
@@ -2766,7 +2766,7 @@ ar_signature_ar_cat(const char *type, struct ar_signature *sig, char **line, siz
 	if (sig->state_reason != NULL) {
 		if ((*aroff =
 			 	auth_ar_cat(line, linelen, *aroff,
-			    	" reason=\"%s\"", sig->state_reason)
+					" reason=\"%s\"", sig->state_reason)
 				) == -1)
 			return -1;
 	}
@@ -2774,7 +2774,7 @@ ar_signature_ar_cat(const char *type, struct ar_signature *sig, char **line, siz
 	if (sig->s[0] != '\0') {
 		if ((*aroff =
 			 	auth_ar_cat(line, linelen, *aroff,
-			    	" header.s=%s", sig->s)
+					" header.s=%s", sig->s)
 				) == -1)
 			return -1;
 	}
@@ -2782,7 +2782,7 @@ ar_signature_ar_cat(const char *type, struct ar_signature *sig, char **line, siz
 	if (sig->d[0] != '\0') {
 		if ((*aroff =
 			 	auth_ar_cat(line, linelen, *aroff,
-			    	" header.d=%s", sig->d)
+					" header.d=%s", sig->d)
 				) == -1)
 			return -1;
 	}
@@ -2795,7 +2795,7 @@ ar_signature_ar_cat(const char *type, struct ar_signature *sig, char **line, siz
 	if (sig->arc_i != 0) {
 		if ((*aroff =
 			 	auth_ar_cat(line, linelen, *aroff,
-			    	" header.i=%d", sig->arc_i)
+					" header.i=%d", sig->arc_i)
 				) == -1)
 			return -1;
 	}
@@ -2824,7 +2824,7 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 	struct message *msg = ctx->local_message;
 
 	if (!arc && (aroff = auth_ar_cat(&line, &linelen, aroff,
-	    "Authentication-Results: %s", authservid)) == -1)
+		"Authentication-Results: %s", authservid)) == -1)
 		osmtpd_err(1, "malloc");
 
 	if (arc) {
@@ -2882,7 +2882,7 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 	}
 
 	if ((aroff = auth_ar_cat(&line, &linelen, aroff,
-	    "; iprev=%s", ar_state2str(ses->iprev))) == -1)
+		"; iprev=%s", ar_state2str(ses->iprev))) == -1)
 		osmtpd_err(1, "malloc");
 
 	if (spf_ar_cat("smtp.helo", ses->spf_helo,
@@ -2930,7 +2930,7 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 				checkpoint = ncheckpoint;
 			}
 			osmtpd_filter_dataline(ctx, "%s%.*s", first ? "" : "\t",
-			    arlen, start);
+				arlen, start);
 			start = osmtpd_ltok_skip_cfws(checkpoint, 1);
 			if (*start == '\0')
 				return 0;
@@ -2944,34 +2944,34 @@ auth_ar_print(struct osmtpd_ctx *ctx, const char *start)
 			ncheckpoint = osmtpd_ltok_skip_cfws(ncheckpoint, 1);
 			/* ARC-AR starts with i= */
 			if (strncmp(ncheckpoint, "i=",
-			    sizeof("i=") - 1) == 0) {
+				sizeof("i=") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_digit(
-				    ncheckpoint + sizeof("i=") - 1, 0);
+					ncheckpoint + sizeof("i=") - 1, 0);
 			/* authserv-id */
 			} else if (arid) {
 				ncheckpoint = osmtpd_ltok_skip_value(
-				    ncheckpoint, 0);
+					ncheckpoint, 0);
 				arid = 0;
 			/* methodspec */
 			} else if (strncmp(ncheckpoint, "arc=",
-			    sizeof("arc=") - 1) == 0) {
+				sizeof("arc=") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_keyword(
-				    ncheckpoint + sizeof("arc=") - 1, 0);
+					ncheckpoint + sizeof("arc=") - 1, 0);
 			} else if (strncmp(ncheckpoint, "dkim=",
-			    sizeof("dkim=") - 1) == 0) {
+				sizeof("dkim=") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_keyword(
-				    ncheckpoint + sizeof("dkim=") - 1, 0);
+					ncheckpoint + sizeof("dkim=") - 1, 0);
 			} else if (strncmp(ncheckpoint, "iprev=",
-			    sizeof("iprev=") - 1) == 0) {
+				sizeof("iprev=") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_keyword(
-				    ncheckpoint + sizeof("iprev=") - 1, 0);
+					ncheckpoint + sizeof("iprev=") - 1, 0);
 			} else if (strncmp(ncheckpoint, "spf=",
-			    sizeof("spf=") - 1) == 0) {
+				sizeof("spf=") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_keyword(
-				    ncheckpoint + sizeof("spf=") - 1, 0);
+					ncheckpoint + sizeof("spf=") - 1, 0);
 			/* reasonspec */
 			} else if (strncmp(ncheckpoint, "reason=",
-			    sizeof("reason=") - 1) == 0) {
+				sizeof("reason=") - 1) == 0) {
 				ncheckpoint = osmtpd_ltok_skip_ar_reasonspec(
 					ncheckpoint, 0);
 			/* propspec */
@@ -3023,15 +3023,15 @@ auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 void
 auth_warn(struct osmtpd_ctx *ctx, const char* format, ...)
 {
-    va_list args;
+	va_list args;
 
 	fprintf(stderr, "%016"PRIx64" ", ctx->reqid);
 
 	va_start(args, format);
-    vfprintf(stderr, format, args);
-    va_end(args);
+	vfprintf(stderr, format, args);
+	va_end(args);
 
-    fprintf(stderr, "\n");
+	fprintf(stderr, "\n");
 }
 
 void
