@@ -2382,7 +2382,7 @@ spf_resolve(struct asr_result *ar, void *arg)
 
 consume:
 	if (spf->running > 0)
-		return;
+		goto end;
 
 	for (i = spf->nqueries - 1; i >= 0; i--) {
 		if (spf->queries[i].txt != NULL) {
@@ -2392,6 +2392,7 @@ consume:
 	}
 
 end:
+	free(ar->ar_data);
 	if (spf->running == 0)
 		osmtpd_filter_proceed(spf->ctx);
 }
