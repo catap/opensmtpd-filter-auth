@@ -482,11 +482,11 @@ spf_record_free(struct spf_record *spf)
 	int i;
 
 	for (i = 0; i < SPF_DNS_LOOKUP_LIMIT; i++) {
-		if(spf->queries[i].domain)
+		if (spf->queries[i].domain)
 			free(spf->queries[i].domain);
-		if(spf->queries[i].txt)
+		if (spf->queries[i].txt)
 			free(spf->queries[i].txt);
-		if(spf->queries[i].eva)
+		if (spf->queries[i].eva)
 			event_asr_abort(spf->queries[i].eva);
 	}
 
