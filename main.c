@@ -2248,7 +2248,10 @@ spf_evaluate_domain(struct spf_record *spf, char *domain)
 		}
 	}
 
-	return strndup(spec, i);
+	if ((tmp = strndup(spec, i)) == NULL)
+		osmtpd_err(1, "malloc");
+
+	return tmp;
 }
 
 void
@@ -2276,7 +2279,7 @@ spf_lookup_record(struct spf_record *spf, char *domain, int type,
 	query->eva = NULL;
 
 	if ((query->domain = spf_evaluate_domain(spf, domain)) == NULL)
-		osmtpd_err(1, "malloc");
+		return;
 
 	auth_domain_wihtout_last_dot(query->domain);
 
