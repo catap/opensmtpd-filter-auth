@@ -2264,7 +2264,10 @@ spf_evaluate_domain(struct spf_record *spf, char *domain)
 		}
 	}
 
-	return strndup(spec, i);
+	if ((tmp = strndup(spec, i)) == NULL)
+		osmtpd_err(1, "%s: strndup", __func__);
+
+	return tmp;
 }
 
 void
@@ -2292,7 +2295,7 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type,
 	query->eva = NULL;
 
 	if ((query->domain = spf_evaluate_domain(spf, domain)) == NULL)
-		osmtpd_err(1, "%s: malloc", __func__);
+		return;
 
 	if (domain == NULL || !strlen(domain)) {
 		spf_done(spf, AR_PERMERROR, "Empty domain");
