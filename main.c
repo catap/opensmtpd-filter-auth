@@ -251,7 +251,6 @@ ssize_t auth_ar_cat(char **ar, size_t *n, size_t aroff, const char *fmt, ...)
 	__attribute__((__format__ (printf, 4, 5)));
 int auth_ar_print(struct osmtpd_ctx *, const char *);
 int ar_key_text_parse(struct ar_signature *, const char *);
-void auth_domain_wihtout_last_dot(char *);
 
 
 /* RFC8617 Section 5.1.1 */
@@ -852,7 +851,7 @@ ar_signature_parse(struct header *header, int dkim, int seal)
 		}
 	}
 
-	if ((size_t)snprintf(subdomain, sizeof(subdomain), "%s._domainkey.%s",
+	if ((size_t)snprintf(subdomain, sizeof(subdomain), "%s._domainkey.%s.",
 		sig->s, sig->d) >= sizeof(subdomain)) {
 		ar_signature_state(sig, AR_PERMERROR,
 			"dns/txt query too long");
@@ -868,8 +867,6 @@ ar_lookup_record(struct ar_signature *sig, char *domain)
 	struct asr_query *query;
 
 	sig->nqueries++;
-
-	auth_domain_wihtout_last_dot(domain);
 
 	if (sig->query != NULL) {
 		event_asr_abort(sig->query);
@@ -2282,9 +2279,9 @@ spf_lookup_record(struct spf_record *spf, char *domain, int type,
 	if ((query->domain = spf_evaluate_domain(spf, domain)) == NULL)
 		return;
 
-	auth_domain_wihtout_last_dot(query->domain);
-
-	if (query->domain == NULL || query->domain[0] == '\0') {
+	if (query->domain == NULL ||
+		query->domain[0] == '.' ||
+		query->domain[0] == '\0') {
 		spf_done(spf, AR_PERMERROR, "Empty domain");
 		return;
 	}
@@ -3036,19 +3033,6 @@ auth_warn(struct osmtpd_ctx *ctx, const char* format, ...)
 	va_end(args);
 
 	fprintf(stderr, "\n");
-}
-
-void
-auth_domain_wihtout_last_dot(char *domain)
-{
-	int len;
-
-	if (domain == NULL)
-		return;
-
-	len = strlen(domain);
-	if (domain[len - 1] == '.')
-		domain[len - 1] = '\0';
 }
 
 __dead void
