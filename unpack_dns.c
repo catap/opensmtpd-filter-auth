@@ -1,4 +1,4 @@
-/*	$OpenBSD: unpack_dns.c,v 1.1 2018/01/06 07:57:53 sunil Exp $	*/
+/*	$OpenBSD: unpack_dns.c,v 1.3 2022/01/20 14:18:10 naddy Exp $	*/
 
 /*
  * Copyright (c) 2011-2014 Eric Faurot <eric@faurot.net>
@@ -15,8 +15,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#include <arpa/inet.h>
 
 #include <string.h>
 
@@ -206,7 +204,7 @@ print_dname(const char *_dname, char *buf, size_t max)
 
 	res = buf;
 	left = max - 1;
-	for (; dname[0] && left;) {
+	while (dname[0] && left) {
 		count = (dname[0] < (left - 1)) ? dname[0] : (left - 1);
 		memmove(buf, dname + 1, count);
 		dname += dname[0] + 1;

@@ -24,6 +24,7 @@
 #include <openssl/sha.h>
 #include <openssl/err.h>
 
+#include <arpa/inet.h>
 #include <arpa/nameser.h>
 
 #include <ctype.h>
@@ -1593,7 +1594,7 @@ ar_rr_resolve(struct asr_result *ar, void *arg)
 		goto verify;
 	}
 
-	for (; h.ancount > 0; h.ancount--) {
+	for (; h.ancount; h.ancount--) {
 		if (unpack_rr(&pack, &rr) != 0) {
 			osmtpd_warn(sig->header->msg->ctx,
 			    "Mallformed DKIM DNS record for domain %s: %s",
