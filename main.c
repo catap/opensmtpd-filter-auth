@@ -866,6 +866,9 @@ ar_lookup_record(struct ar_signature *sig, char *domain)
 {
 	struct asr_query *query;
 
+	if (sig->state != AR_UNKNOWN)
+		return;
+
 	sig->nqueries++;
 
 	if (sig->query != NULL) {
@@ -1552,6 +1555,9 @@ ar_rr_resolve(struct asr_result *ar, void *arg)
 
 	sig->query = NULL;
 	sig->header->msg->nqueries--;
+
+	if (sig->state != AR_UNKNOWN)
+		goto verify;
 
 	if (ar->ar_h_errno == TRY_AGAIN || ar->ar_h_errno == NO_RECOVERY) {
 		ar_signature_state(sig, AR_TEMPERROR,
