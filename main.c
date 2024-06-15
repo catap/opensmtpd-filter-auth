@@ -870,6 +870,7 @@ ar_lookup_record(struct ar_signature *sig, const char *domain)
 	if (sig->query != NULL) {
 		event_asr_abort(sig->query);
 		sig->query = NULL;
+		sig->header->msg->nqueries--;
 	}
 
 	if ((query = res_query_async(domain, C_IN, T_TXT, NULL)) == NULL)
@@ -1493,6 +1494,7 @@ ar_signature_state(struct ar_signature *sig, enum ar_state state,
 	if (sig->query != NULL) {
 		event_asr_abort(sig->query);
 		sig->query = NULL;
+		sig->header->msg->nqueries--;
 	}
 	switch (sig->state) {
 	case AR_UNKNOWN:
