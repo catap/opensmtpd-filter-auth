@@ -496,6 +496,9 @@ dkim_lookup_record(struct signature *sig, const char *domain)
 {
 	struct asr_query *query;
 
+	if (sig->state != DKIM_UNKNOWN)
+		return;
+
 	sig->nqueries++;
 
 	if (sig->query != NULL) {
@@ -1115,6 +1118,9 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 	char buf[HOST_NAME_MAX + 1];
 
 	sig->query = NULL;
+
+	if (sig->state != DKIM_UNKNOWN)
+		goto verify;
 
 	if (ar->ar_h_errno == TRY_AGAIN || ar->ar_h_errno == NO_RECOVERY) {
 		dkim_signature_state(sig, DKIM_TEMPERROR,
