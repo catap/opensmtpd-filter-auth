@@ -370,9 +370,7 @@ spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 
 	snprintf(from, sizeof(from), "postmaster@%s", identity);
 
-	ses->spf_helo = spf_record_new(ctx, from);
-
-	if (ses->spf_helo->running == 0)
+	if ((ses->spf_helo = spf_record_new(ctx, from)) == NULL)
 		osmtpd_filter_proceed(ctx);
 }
 
@@ -389,9 +387,7 @@ spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 	if (ses->spf_mailfrom)
 		spf_record_free(ses->spf_mailfrom);
 
-	ses->spf_mailfrom = spf_record_new(ctx, from);
-
-	if (ses->spf_mailfrom->running == 0)
+	if ((ses->spf_mailfrom = spf_record_new(ctx, from)) == NULL)
 		osmtpd_filter_proceed(ctx);
 }
 
@@ -446,7 +442,7 @@ spf_record_new(struct osmtpd_ctx *ctx, const char *from)
 		osmtpd_err(1, "malloc");
 
 	spf->ctx = ctx;
-	spf->state = AR_NONE;
+	spf->state = AR_UNKNOWN;
 	spf->state_reason = NULL;
 	spf->nqueries = 0;
 	spf->running = 0;
@@ -2416,8 +2412,8 @@ consume:
 
 end:
 	free(ar->ar_data);
-	if (spf->running == 0)
-		osmtpd_filter_proceed(spf->ctx);
+	if (!spf->done && spf->running == 0)
+		spf_done(spf, AR_NONE, NULL);
 }
 
 void
@@ -2712,6 +2708,8 @@ spf_done(struct spf_record *spf, enum ar_state state, const char *reason)
 	spf->state = state;
 	spf->state_reason = reason;
 	spf->done = 1;
+
+	osmtpd_filter_proceed(spf->ctx);
 }
 
 int
