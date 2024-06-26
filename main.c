@@ -2022,8 +2022,10 @@ spf_evaluate_domain(struct spf_record *spf, char *domain)
 	long digits;
 	int reverse;
 
-	if (domain == NULL)
+	if (domain == NULL || domain[0] == '\0') {
+		spf_done(spf, AR_PERMERROR, "Empty domain");
 		return NULL;
+	}
 
 	for (i = 0;
 		 domain[0] != ' ' && domain[0] != '\0' && i < sizeof(spec);
