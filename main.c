@@ -353,20 +353,27 @@ spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 
 	struct session *ses = ctx->local_session;
 
-	if (identity == NULL)
+	if (identity == NULL) {
+		osmtpd_filter_proceed(ctx);
 		return;
+	}
 
 	if ((ses->identity = strdup(identity)) == NULL) {
 		osmtpd_err(1, "malloc");
 		return;
 	}
 
-	if (strlen(identity) == 0)
+	if (strlen(identity) == 0) {
+		osmtpd_filter_proceed(ctx);
 		return;
+	}
 
 	snprintf(from, sizeof(from), "postmaster@%s", identity);
 
 	ses->spf_helo = spf_record_new(ctx, from);
+
+	if (ses->spf_helo->running == 0)
+		osmtpd_filter_proceed(ctx);
 }
 
 void
@@ -374,13 +381,18 @@ spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 {
 	struct session *ses = ctx->local_session;
 
-	if (from == NULL || !strlen(from))
+	if (from == NULL || !strlen(from)) {
+		osmtpd_filter_proceed(ctx);
 		return;
+	}
 
 	if (ses->spf_mailfrom)
 		spf_record_free(ses->spf_mailfrom);
 
 	ses->spf_mailfrom = spf_record_new(ctx, from);
+
+	if (ses->spf_mailfrom->running == 0)
+		osmtpd_filter_proceed(ctx);
 }
 
 void
