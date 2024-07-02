@@ -2026,7 +2026,8 @@ spf_evaluate_domain(struct spf_record *spf, char *domain)
 	char spec[HOST_NAME_MAX + 1];
 	char macro[HOST_NAME_MAX + 1], smacro[sizeof(macro)];
 	char delimiters[sizeof(".-+,/_=")];
-	char *addr, *endptr, *tmp;
+	char *endptr, *tmp;
+	const u_char *addr;
 	size_t i, mlen;
 	long digits;
 	int reverse;
@@ -2108,34 +2109,36 @@ spf_evaluate_domain(struct spf_record *spf, char *domain)
 					case 'I':
 					case 'i':
 						if (ses->src.ss_family == AF_INET) {
-							addr = (char *)(&((struct sockaddr_in *)
-					    		&(ses->src))->sin_addr);
+							addr = (u_char *)(&((struct sockaddr_in *)
+								&(ses->src))->sin_addr);
 							mlen = snprintf(macro, sizeof(macro),
-					    		"%u.%u.%u.%u",
-								addr[0], addr[1], addr[2], addr[3]);
+								"%u.%u.%u.%u",
+								(addr[0] & 0xff), (addr[1] & 0xff),
+								(addr[2] & 0xff), (addr[3] & 0xff));
 						} else if (ses->src.ss_family == AF_INET6) {
-							addr = (char *)(&((struct sockaddr_in6 *)
-					    		&(ses->src))->sin6_addr);
+							addr = (u_char *)(&((struct sockaddr_in6 *)
+								&(ses->src))->sin6_addr);
 							mlen = snprintf(macro, sizeof(macro),
-								"%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
-								"%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
-								"%x.%x.%x.%x.%x.%x.%x.%x.%x.%x",
-								(addr[0] >> 4), (addr[0] & 0xf),
-								(addr[1] >> 4), (addr[1] & 0xf),
-								(addr[2] >> 4), (addr[2] & 0xf),
-								(addr[3] >> 4), (addr[3] & 0xf),
-								(addr[4] >> 4), (addr[4] & 0xf),
-								(addr[5] >> 4), (addr[5] & 0xf),
-								(addr[6] >> 4), (addr[6] & 0xf),
-								(addr[7] >> 4), (addr[7] & 0xf),
-								(addr[8] >> 4), (addr[8] & 0xf),
-								(addr[9] >> 4), (addr[9] & 0xf),
-								(addr[10] >> 4), (addr[10] & 0xf),
-								(addr[11] >> 4), (addr[11] & 0xf),
-								(addr[12] >> 4), (addr[12] & 0xf),
-								(addr[13] >> 4), (addr[13] & 0xf),
-								(addr[14] >> 4), (addr[14] & 0xf),
-								(addr[15] >> 4), (addr[15] & 0xf));
+								"%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx."
+								"%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx."
+								"%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx."
+								"%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx.%hhx",
+								(u_char) ((addr[0] >> 4) & 0x0f), (u_char) (addr[0] & 0x0f),
+								(u_char) ((addr[1] >> 4) & 0x0f), (u_char) (addr[1] & 0x0f),
+								(u_char) ((addr[2] >> 4) & 0x0f), (u_char) (addr[2] & 0x0f),
+								(u_char) ((addr[3] >> 4) & 0x0f), (u_char) (addr[3] & 0x0f),
+								(u_char) ((addr[4] >> 4) & 0x0f), (u_char) (addr[4] & 0x0f),
+								(u_char) ((addr[5] >> 4) & 0x0f), (u_char) (addr[5] & 0x0f),
+								(u_char) ((addr[6] >> 4) & 0x0f), (u_char) (addr[6] & 0x0f),
+								(u_char) ((addr[7] >> 4) & 0x0f), (u_char) (addr[7] & 0x0f),
+								(u_char) ((addr[8] >> 4) & 0x0f), (u_char) (addr[8] & 0x0f),
+								(u_char) ((addr[9] >> 4) & 0x0f), (u_char) (addr[9] & 0x0f),
+								(u_char) ((addr[10] >> 4) & 0x0f), (u_char) (addr[10] & 0x0f),
+								(u_char) ((addr[11] >> 4) & 0x0f), (u_char) (addr[11] & 0x0f),
+								(u_char) ((addr[12] >> 4) & 0x0f), (u_char) (addr[12] & 0x0f),
+								(u_char) ((addr[13] >> 4) & 0x0f), (u_char) (addr[13] & 0x0f),
+								(u_char) ((addr[14] >> 4) & 0x0f), (u_char) (addr[14] & 0x0f),
+								(u_char) ((addr[15] >> 4) & 0x0f), (u_char) (addr[15] & 0x0f));
 						} else {
 							spf_done(spf, AR_PERMERROR,
 									 "unsupported type of address");
