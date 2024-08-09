@@ -1348,11 +1348,15 @@ ar_signature_verify(struct ar_signature *sig)
 	EVP_MD_CTX_reset(bctx);
 	if (!sig->sephash) {
 		if (EVP_DigestVerifyInit(bctx, NULL, sig->ah, NULL,
-			sig->p) != 1)
-			osmtpd_err(1, "EVP_DigestVerifyInit");
+			sig->p) != 1) {
+			ar_signature_state(sig, AR_FAIL, "ah tag");
+			return;
+		}
 	} else {
-		if (EVP_DigestInit_ex(bctx, sig->ah, NULL) != 1)
-			osmtpd_err(1, "EVP_DigestInit_ex");
+		if (EVP_DigestInit_ex(bctx, sig->ah, NULL) != 1) {
+			ar_signature_state(sig, AR_FAIL, "ah tag");
+			return;
+		}
 	}
 
 	for (i = 0; i < msg->nheaders; i++)
