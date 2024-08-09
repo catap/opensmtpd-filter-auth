@@ -1393,8 +1393,10 @@ ar_signature_verify(struct ar_signature *sig)
 
 	ar_signature_header(bctx, sig, sig->header);
 	if (!sig->sephash) {
-		if (EVP_DigestVerifyFinal(bctx, sig->b, sig->bsz) != 1)
+		if (EVP_DigestVerifyFinal(bctx, sig->b, sig->bsz) != 1) {
 			ar_signature_state(sig, AR_FAIL, "b mismatch");
+			return;
+		}
 	} else {
 		if (EVP_DigestFinal_ex(bctx, digest, &digestsz) == 0)
 			osmtpd_err(1, "EVP_DigestFinal_ex");
