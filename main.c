@@ -949,8 +949,10 @@ ar_signature_parse_a(struct ar_signature *sig, const char *start, const char *en
 	if ((sig->bhctx = EVP_MD_CTX_new()) == NULL)
 		osmtpd_err(1, "EVP_MD_CTX_new");
 
-	if (EVP_DigestInit_ex(sig->bhctx, sig->ah, NULL) <= 0)
-		osmtpd_err(1, "EVP_DigestInit_ex");
+	if (EVP_DigestInit_ex(sig->bhctx, sig->ah, NULL) <= 0) {
+		ar_signature_state(sig, AR_FAIL, "Unsuppored a tag ah");
+		return;
+	}
 }
 
 void
