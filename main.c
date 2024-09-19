@@ -1127,7 +1127,7 @@ dkim_rr_resolve(struct asr_result *ar, void *arg)
 		    hstrerror(ar->ar_h_errno));
 		goto verify;
 	}
-	if (ar->ar_h_errno != NETDB_SUCCESS) {
+	if (ar->ar_h_errno == HOST_NOT_FOUND) {
 		dkim_signature_state(sig, DKIM_PERMERROR,
 		    hstrerror(ar->ar_h_errno));
 		goto verify;
