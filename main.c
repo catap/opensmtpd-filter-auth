@@ -2353,9 +2353,7 @@ spf_resolve(struct asr_result *ar, void *arg)
 		goto end;
 	}
 
-	if (ar->ar_h_errno == HOST_NOT_FOUND
-		|| ar->ar_h_errno == NO_DATA
-		|| ar->ar_h_errno == NO_ADDRESS) {
+	if (ar->ar_h_errno == HOST_NOT_FOUND) {
 		if (query->include && !query->exists)
 			spf_done(query->spf,
 				AR_PERMERROR, hstrerror(ar->ar_h_errno));
