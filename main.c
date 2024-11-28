@@ -2920,9 +2920,15 @@ auth_ar_create(struct osmtpd_ctx *ctx)
 			&line, &linelen, &aroff) != 0)
 		osmtpd_err(1, "malloc");
 
-	if (spf_ar_cat("smtp.mailfrom", ses->spf_mailfrom,
-			&line, &linelen, &aroff) != 0)
-		osmtpd_err(1, "malloc");
+	if (ses->spf_mailfrom != NULL) {
+		if (spf_ar_cat("smtp.mailfrom", ses->spf_mailfrom,
+			       &line, &linelen, &aroff) != 0)
+			osmtpd_err(1, "malloc");
+	} else {
+		if (spf_ar_cat("smtp.mailfrom", ses->spf_helo,
+			       &line, &linelen, &aroff) != 0)
+			osmtpd_err(1, "malloc");
+	}
 
 	if (aroff == -1)
 		osmtpd_err(1, "malloc");
