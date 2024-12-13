@@ -67,6 +67,9 @@ struct signature {
 	char *b;
 	size_t bsz;
 	const char *bheader;
+	size_t bheadersz;
+#define HEADER_B_MAX_LEN        8
+	char bheaderclean[HEADER_B_MAX_LEN + 1];
 	/* Make sure padding bits for base64 decoding fit */
 	char bh[EVP_MAX_MD_SIZE + (3 - (EVP_MAX_MD_SIZE % 3))];
 	size_t bhsz;
@@ -591,20 +594,20 @@ void
 dkim_signature_parse_b(struct signature *sig, const char *start, const char *end)
 {
 	int decodesz;
+	size_t i, j;
 
 	if (sig->b != NULL) {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Duplicate b tag");
 		return;
 	}
 	sig->bheader = start;
-	if ((sig->b = malloc((((end - start) / 4) + 1) * 3)) == NULL) {
-		dkim_err(sig->header->msg, "malloc");
-		return;
-	}
+	sig->bheadersz = end - start;
+	if ((sig->b = malloc(((sig->bheadersz / 4) + 1) * 3)) == NULL)
+		osmtpd_err(1, "malloc");
 	/* EVP_DecodeBlock doesn't handle internal whitespace */
 	EVP_DecodeInit(ectx);
-	if (EVP_DecodeUpdate(ectx, sig->b, &decodesz, start,
-	    (int)(end - start)) == -1) {
+	if (EVP_DecodeUpdate(ectx, sig->b, &decodesz, sig->bheader,
+	    (int) sig->bheadersz) == -1) {
 		dkim_signature_state(sig, DKIM_PERMERROR, "Invalid b tag");
 		return;
 	}
@@ -615,6 +618,13 @@ dkim_signature_parse_b(struct signature *sig, const char *start, const char *end
 		return;
 	}
 	sig->bsz += decodesz;
+	for (i = 0, j = 0;
+	     i < sig->bheadersz && j < HEADER_B_MAX_LEN; i++) {
+		if (isalnum(sig->bheader[i]) || sig->bheader[i] == '/'
+		    || sig->bheader[i] == '+' || sig->bheader[i] == '=')
+			sig->bheaderclean[j++] = sig->bheader[i];
+	}
+	sig->bheaderclean[j] = '\0';
 }
 
 void
@@ -1634,6 +1644,13 @@ dkim_message_verify(struct message *msg)
 		if (sig->a != NULL) {
 			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
 			    " header.a=%.*s", (int)sig->asz, sig->a)) == -1) {
+				dkim_err(msg, "malloc");
+				goto fail;
+			}
+		}
+		if (sig->bheaderclean[0] != '\0') {
+			if ((aroff = dkim_ar_cat(&line, &linelen, aroff,
+			    " header.b=%s", sig->bheaderclean)) == -1) {
 				dkim_err(msg, "malloc");
 				goto fail;
 			}
