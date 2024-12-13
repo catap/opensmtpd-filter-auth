@@ -77,9 +77,10 @@ struct ar_signature {
 	const EVP_MD *ah;
 	char *b;
 	size_t bsz;
-#define HEADER_B_MAX_LEN        8
 	const char *bheader;
 	size_t bheadersz;
+#define HEADER_B_MAX_LEN        8
+	char bheaderclean[HEADER_B_MAX_LEN + 1];
 	/* Make sure padding bits for base64 decoding fit */
 	char bh[EVP_MAX_MD_SIZE + (3 - (EVP_MAX_MD_SIZE % 3))];
 	size_t bhsz;
@@ -961,7 +962,7 @@ ar_signature_parse_a(struct ar_signature *sig, const char *start, const char *en
 void
 ar_signature_parse_b(struct ar_signature *sig, const char *start, const char *end)
 {
-	int decodesz;
+	int decodesz, i, j;
 
 	if (sig->b != NULL) {
 		ar_signature_state(sig, AR_PERMERROR, "Duplicate b tag");
@@ -985,6 +986,12 @@ ar_signature_parse_b(struct ar_signature *sig, const char *start, const char *en
 		return;
 	}
 	sig->bsz += decodesz;
+	for (i = 0, j = 0;
+	     i < sig->bheadersz && j < HEADER_B_MAX_LEN; i++) {
+		if (isalpha(sig->bheader[i]))
+			 sig->bheaderclean[j++] = sig->bheader[i];
+	}
+	sig->bheaderclean[j] = '\0';
 }
 
 void
@@ -2842,12 +2849,11 @@ ar_signature_ar_cat(const char *type, struct ar_signature *sig, char **line, siz
 			return -1;
 	}
 
-	if (sig->bheader != NULL) {
+	if (sig->bheaderclean[0] != '\0') {
 		if ((*aroff =
 			 	auth_ar_cat(line, linelen, *aroff,
-					" header.b=%.*s",
-					MIN(HEADER_B_MAX_LEN, (int)sig->bheadersz),
-					sig->bheader)
+					" header.b=%s",
+					sig->bheaderclean)
 				) == -1)
 			return -1;
 	}
