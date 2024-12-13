@@ -988,7 +988,8 @@ ar_signature_parse_b(struct ar_signature *sig, const char *start, const char *en
 	sig->bsz += decodesz;
 	for (i = 0, j = 0;
 	     i < sig->bheadersz && j < HEADER_B_MAX_LEN; i++) {
-		if (isalpha(sig->bheader[i]))
+		if (isalnum(sig->bheader[i]) || sig->bheader[i] == '/'
+		    || sig->bheader[i] == '+' || sig->bheader[i] == '=')
 			 sig->bheaderclean[j++] = sig->bheader[i];
 	}
 	sig->bheaderclean[j] = '\0';
