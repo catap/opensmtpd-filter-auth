@@ -77,7 +77,9 @@ struct ar_signature {
 	const EVP_MD *ah;
 	char *b;
 	size_t bsz;
+#define HEADER_B_MAX_LEN        8
 	const char *bheader;
+	size_t bheadersz;
 	/* Make sure padding bits for base64 decoding fit */
 	char bh[EVP_MAX_MD_SIZE + (3 - (EVP_MAX_MD_SIZE % 3))];
 	size_t bhsz;
@@ -966,12 +968,13 @@ ar_signature_parse_b(struct ar_signature *sig, const char *start, const char *en
 		return;
 	}
 	sig->bheader = start;
-	if ((sig->b = malloc((((end - start) / 4) + 1) * 3)) == NULL)
+	sig->bheadersz = end - start;
+	if ((sig->b = malloc(((sig->bheadersz / 4) + 1) * 3)) == NULL)
 		osmtpd_err(1, "malloc");
 	/* EVP_DecodeBlock doesn't handle internal whitespace */
 	EVP_DecodeInit(ectx);
-	if (EVP_DecodeUpdate(ectx, sig->b, &decodesz, start,
-		(int)(end - start)) == -1) {
+	if (EVP_DecodeUpdate(ectx, sig->b, &decodesz, sig->bheader,
+		(int) sig->bheadersz) == -1) {
 		ar_signature_state(sig, AR_PERMERROR, "Invalid b tag");
 		return;
 	}
@@ -2835,6 +2838,16 @@ ar_signature_ar_cat(const char *type, struct ar_signature *sig, char **line, siz
 		if ((*aroff =
 			 	auth_ar_cat(line, linelen, *aroff,
 					" header.a=%.*s", (int)sig->asz, sig->a)
+				) == -1)
+			return -1;
+	}
+
+	if (sig->bheader != NULL) {
+		if ((*aroff =
+			 	auth_ar_cat(line, linelen, *aroff,
+					" header.b=%.*s",
+					MIN(HEADER_B_MAX_LEN, (int)sig->bheadersz),
+					sig->bheader)
 				) == -1)
 			return -1;
 	}
