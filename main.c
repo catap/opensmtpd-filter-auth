@@ -962,7 +962,8 @@ ar_signature_parse_a(struct ar_signature *sig, const char *start, const char *en
 void
 ar_signature_parse_b(struct ar_signature *sig, const char *start, const char *end)
 {
-	int decodesz, i, j;
+	int decodesz;
+	size_t i, j;
 
 	if (sig->b != NULL) {
 		ar_signature_state(sig, AR_PERMERROR, "Duplicate b tag");
