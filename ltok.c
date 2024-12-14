@@ -1897,9 +1897,10 @@ osmtpd_ltok_skip_ar_propspec(const char *ptr, int optional)
 	value = osmtpd_ltok_skip_value(ptr, 0);
 
 	ptr = osmtpd_ltok_skip_local_part(ptr, 1);
-	if (*ptr == '@')
+	if (*ptr == '@') {
 		ptr++;
-	ptr = osmtpd_ltok_skip_domain(ptr, 0);
+		ptr = osmtpd_ltok_skip_domain(ptr, 0);
+	}
 
 	if (value > ptr)
 		ptr = value;
