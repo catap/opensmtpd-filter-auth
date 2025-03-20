@@ -2438,7 +2438,7 @@ spf_lookup_record(struct spf_record *spf, const char *domain, int type,
 		return;
 
 	if (spf->nqueries >= SPF_DNS_LOOKUP_LIMIT) {
-		spf_done(spf, AR_PERMERROR, "To many DNS queries");
+		spf_done(spf, AR_PERMERROR, "Too many DNS queries");
 		return;
 	}
 
