@@ -41,6 +41,7 @@
 #include <unistd.h>
 #include <asr.h>
 
+#include "openbsd-compat.h"
 #include "unpack_dns.h"
 #include "ltok.h"
 
@@ -158,8 +159,13 @@ struct header {
 };
 
 #define AUTHENTICATION_RESULTS_LINELEN 78
+#ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
 
+#ifndef s6_addr32
+#define s6_addr32 __u6_addr.__u6_addr32
+#endif
 
 /* RFC 8617 Section 4.2.1 */
 #define ARC_MIN_I 1
@@ -2716,8 +2722,8 @@ spf_check_cidr6(struct spf_record *spf, struct in6_addr *net, int bits)
 
 	addr = &(((struct sockaddr_in6 *)(&ses->src))->sin6_addr);
 
-	a = addr->__u6_addr.__u6_addr32;
-	n = net->__u6_addr.__u6_addr32;
+	a = addr->s6_addr32;
+	n = net->s6_addr32;
 
 	whole = bits >> 5;
 	incomplete = bits & 0x1f;
