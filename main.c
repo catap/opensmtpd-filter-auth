@@ -2790,7 +2790,7 @@ spf_execute_txt(struct spf_query *query)
 			continue;
 		}
 		if (strncasecmp("ip6:", ap, 4) == 0) {
-			if ((bits = inet_net_pton(AF_INET6, ap + 4, &ina, sizeof(ina))) == -1)
+			if ((bits = inet_net_pton(AF_INET6, ap + 4, &in6a, sizeof(in6a))) == -1)
 				continue;
 
 			if (spf_check_cidr6(query->spf, &in6a, bits) == 0) {
