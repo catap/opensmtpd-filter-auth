@@ -199,10 +199,10 @@ struct session {
 
 void usage(void);
 void auth_conf(const char *, const char *);
-void auth_connect(struct osmtpd_ctx *, const char *, enum osmtpd_status, struct sockaddr_storage *, struct sockaddr_storage *);
-void spf_identity(struct osmtpd_ctx *, const char *);
-void spf_mailfrom(struct osmtpd_ctx *, const char *);
-void auth_dataline(struct osmtpd_ctx *, const char *);
+int auth_connect(struct osmtpd_ctx *, const char *, enum osmtpd_status, struct sockaddr_storage *, struct sockaddr_storage *);
+int spf_identity(struct osmtpd_ctx *, const char *);
+int spf_mailfrom(struct osmtpd_ctx *, const char *);
+int auth_dataline(struct osmtpd_ctx *, const char *);
 void *spf_record_new(struct osmtpd_ctx *, const char *);
 void spf_record_free(struct spf_record *);
 void *auth_session_new(struct osmtpd_ctx *);
@@ -323,6 +323,7 @@ auth_conf(const char *key, const char *value)
 	if (key == NULL) {
 		if (authservid == NULL)
 			osmtpd_errx(1, "Didn't receive admd config option");
+
 		return;
 	}
 	if (strcmp(key, "admd") == 0 && authservid == NULL) {
@@ -334,7 +335,7 @@ auth_conf(const char *key, const char *value)
 	}
 }
 
-void
+int
 auth_connect(struct osmtpd_ctx *ctx, const char *rdns, enum osmtpd_status fcrdns,
 			 struct sockaddr_storage *src, struct sockaddr_storage *dst)
 {
@@ -351,9 +352,11 @@ auth_connect(struct osmtpd_ctx *ctx, const char *rdns, enum osmtpd_status fcrdns
 		if ((ses->rdns = strdup(rdns)) == NULL)
 			osmtpd_err(1, "%s: malloc", __func__);
 	}
+
+	return 0;
 }
 
-void
+int
 spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 {
 	char from[HOST_NAME_MAX + 12];
@@ -362,7 +365,7 @@ spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 
 	if (identity == NULL) {
 		osmtpd_filter_proceed(ctx);
-		return;
+		return 0;
 	}
 
 	if ((ses->identity = strdup(identity)) == NULL)
@@ -370,23 +373,25 @@ spf_identity(struct osmtpd_ctx *ctx, const char *identity)
 
 	if (strlen(identity) == 0) {
 		osmtpd_filter_proceed(ctx);
-		return;
+		return 0;
 	}
 
 	snprintf(from, sizeof(from), "postmaster@%s", identity);
 
 	if ((ses->spf_helo = spf_record_new(ctx, from)) == NULL)
 		osmtpd_filter_proceed(ctx);
+
+	return 0;
 }
 
-void
+int
 spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 {
 	struct session *ses = ctx->local_session;
 
 	if (from == NULL || !strlen(from)) {
 		osmtpd_filter_proceed(ctx);
-		return;
+		return 0;
 	}
 
 	if (ses->spf_mailfrom)
@@ -394,16 +399,23 @@ spf_mailfrom(struct osmtpd_ctx *ctx, const char *from)
 
 	if ((ses->spf_mailfrom = spf_record_new(ctx, from)) == NULL)
 		osmtpd_filter_proceed(ctx);
+
+	return 0;
 }
 
-void
+int
 auth_dataline(struct osmtpd_ctx *ctx, const char *line)
 {
 	struct message *msg = ctx->local_message;
 	size_t i;
+	size_t linelen;
 
-	if (fprintf(msg->origf, "%s\n", line) < 0)
-		osmtpd_err(1, "Couldn't write to tempfile");
+	linelen = strlen(line);
+
+	if (fprintf(msg->origf, "%s\n", line) < (int) linelen) {
+		osmtpd_warnx(ctx, "Couldn't write to tempfile");
+		return -1;
+	}
 
 	if (line[0] == '.') {
 		line++;
@@ -415,7 +427,7 @@ auth_dataline(struct osmtpd_ctx *ctx, const char *line)
 				ar_body_verify(msg->header[i].sig);
 			}
 			auth_message_verify(msg);
-			return;
+			return 0;
 		}
 	}
 	if (msg->parsing_headers) {
@@ -430,10 +442,12 @@ auth_dataline(struct osmtpd_ctx *ctx, const char *line)
 					    msg->header[i].sig);
 			}
 		}
-		return;
+		return 0;
 	} else {
 		ar_body_parse(msg, line);
 	}
+
+	return 0;
 }
 
 void *
