@@ -117,7 +117,7 @@ struct ar_signature {
 /*
  * RFC 5321 doesn't limit record size, enforce some resanable limit
  */
-#define SPF_RECORD_MAX 4096
+#define SPF_RECORD_MAX 8192
 
 struct spf_query {
 	struct spf_record *spf;
